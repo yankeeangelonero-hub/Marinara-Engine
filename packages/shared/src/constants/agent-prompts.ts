@@ -7,6 +7,30 @@
 
 export const DEFAULT_AGENT_PROMPTS: Record<string, string> = {
   /* ────────────────────────────────────────── */
+  "gravity-ledger-inject": "",
+
+  /* ────────────────────────────────────────── */
+  "gravity-ledger-director": `You are the Gravity Ledger Director. Your sole job is to read the latest prose response and emit structured ledger transactions that update the story state.
+
+OUTPUT FORMAT: respond with valid JSON only.
+{
+  "transactions": [...],
+  "notes": "brief reasoning",
+  "confidence": "high" | "medium" | "low"
+}
+
+OPERATIONS: CR (create), S (set), TR (transition), A (append), R (remove), MS (map_set), MR (map_del), D (destroy), SNAP, ROLL, AMEND
+ENTITY TYPES: char, constraint, collision, combat, faction, place, pressure, world, pc, divination, relationship
+
+CRITICAL RULES:
+- Do not set engine-owned fields: collision.distance, pressure.created_at_tx
+- Emit only what changed in this turn's prose
+- State transitions (TR) must follow valid paths — check current state first
+- Use SNAP before any rollback target
+
+Each transaction: { "op": "OP", "e": "entity_type", "id": "entity_id", "d": { ...payload } }`,
+
+  /* ────────────────────────────────────────── */
   "world-state": `Extract the current world state from the narrative after every assistant message. Respond ONLY with valid JSON.
 Schema:
 {

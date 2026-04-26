@@ -37,7 +37,8 @@ export type AgentResultType =
   | "game_master_narration"
   | "party_action"
   | "game_map_update"
-  | "game_state_transition";
+  | "game_state_transition"
+  | "gravity_state_update";
 
 /** Configuration for a single agent. */
 export interface AgentConfig {
@@ -178,6 +179,8 @@ export const BUILT_IN_AGENT_IDS = {
   SECRET_PLOT_DRIVER: "secret-plot-driver",
   GAME_MASTER: "game-master",
   PARTY_PLAYER: "party-player",
+  GRAVITY_LEDGER_INJECT: "gravity-ledger-inject",
+  GRAVITY_LEDGER_DIRECTOR: "gravity-ledger-director",
 } as const;
 
 export type AgentCategory = "writer" | "tracker" | "misc";
@@ -302,6 +305,25 @@ export const BUILT_IN_AGENTS: BuiltInAgentMeta[] = [
     phase: "post_processing",
     enabledByDefault: false,
     defaultInjectAsSection: true,
+    category: "tracker",
+  },
+  {
+    id: "gravity-ledger-inject",
+    name: "Gravity Ledger (State Injection)",
+    description:
+      "Injects Gravity structural state — collisions, constraints, character dossiers, factions — into the prose model's prompt each turn. Deterministic; no LLM call.",
+    phase: "pre_generation",
+    enabledByDefault: false,
+    defaultInjectAsSection: true,
+    category: "tracker",
+  },
+  {
+    id: "gravity-ledger-director",
+    name: "Gravity Ledger (Director)",
+    description:
+      "After the prose response (and after the editor agent), interprets structural state changes and commits them to the Gravity ledger. Requires a separate model connection.",
+    phase: "post_processing",
+    enabledByDefault: false,
     category: "tracker",
   },
 
@@ -469,6 +491,7 @@ export const BUILT_IN_AGENT_RUN_INTERVAL_DEFAULTS: Readonly<Record<string, numbe
   director: 5,
   "lorebook-keeper": 8,
   "chat-summary": 5,
+  "gravity-ledger-director": 1,
 };
 
 export function getDefaultBuiltInAgentSettings(agentType: string): Record<string, unknown> {
