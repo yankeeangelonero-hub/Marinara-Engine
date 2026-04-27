@@ -17,6 +17,7 @@ import { createChatsStorage } from "../../services/storage/chats.storage.js";
 import { createConnectionsStorage } from "../../services/storage/connections.storage.js";
 import { createGameStateStorage } from "../../services/storage/game-state.storage.js";
 import { createLorebooksStorage } from "../../services/storage/lorebooks.storage.js";
+import { createDirectorAgent } from "../../services/gravity/agents/director-agent.js";
 import { syncGameMapPartyPosition } from "../../services/game/map-position.service.js";
 import { gameStateSnapshots as gameStateSnapshotsTable } from "../../db/schema/index.js";
 import { parseExtra, parseGameStateRow, resolveBaseUrl } from "./generate-route-utils.js";
@@ -943,8 +944,47 @@ export async function registerRetryAgentsRoute(app: FastifyInstance) {
 
         sendSseEvent(reply, { type: "agent_start", data: { phase: "retry" } });
         const lorebookKeeperAgent = resolvedAgents.find((entry) => entry.resolved.type === "lorebook-keeper") ?? null;
-        const nonLorebookAgents = resolvedAgents.filter((entry) => entry.resolved.type !== "lorebook-keeper");
+
+        // Gravity agents cannot go through the generic executeAgent path:
+        //   gravity-ledger-inject  — no LLM call; reads DB state; not retryable here
+        //   gravity-ledger-director — has its own execution path (runGravityDirector)
+        const gravityDirectorEntry = resolvedAgents.find((entry) => entry.resolved.type === "gravity-ledger-director") ?? null;
+        const nonLorebookAgents = resolvedAgents.filter(
+          (entry) =>
+            entry.resolved.type !== "lorebook-keeper" &&
+            entry.resolved.type !== "gravity-ledger-inject" &&
+            entry.resolved.type !== "gravity-ledger-director",
+        );
         const results = nonLorebookAgents.length > 0 ? await executeRetryBatches(agentContext, nonLorebookAgents) : [];
+
+        // ── Gravity Director retry ─────────────────────────────────────────────
+        if (gravityDirectorEntry && lastAssistant) {
+          try {
+            const gravityDirectorAgent = createDirectorAgent(app.db);
+            const dirResult = await gravityDirectorAgent.runGravityDirector({
+              chatId,
+              messageId: lastAssistant.id as string,
+              swipeIndex: (lastAssistant.activeSwipeIndex as number) ?? 0,
+              assistantMessage: (lastAssistant.content as string) ?? "",
+              agentConfig: gravityDirectorEntry.resolved,
+              context: agentContext,
+              provider: gravityDirectorEntry.agentProvider,
+              model: gravityDirectorEntry.agentModel,
+              signal: new AbortController().signal,
+            });
+            results.push(dirResult);
+            try {
+              await agentsStore.saveRun({
+                agentConfigId: gravityDirectorEntry.resolved.id,
+                chatId,
+                messageId: lastAssistant.id as string,
+                result: dirResult,
+              });
+            } catch { /* non-critical */ }
+          } catch (dirErr) {
+            logger.error(dirErr, "[retry-agents] Gravity director retry failed for chat %s", chatId);
+          }
+        }
         const lorebookKeeperRunEntries = lorebookKeeperAgent
           ? await executeLorebookKeeperRetries({
               lorebookKeeperAgent,
