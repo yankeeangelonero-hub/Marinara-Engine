@@ -27,6 +27,9 @@ import { createPromptsStorage } from "../services/storage/prompts.storage.js";
 import { createCharactersStorage } from "../services/storage/characters.storage.js";
 import { createAgentsStorage } from "../services/storage/agents.storage.js";
 import { createGameStateStorage } from "../services/storage/game-state.storage.js";
+import { createGravityAcceptance } from "../services/gravity/engine/acceptance.js";
+import { createInjectAgent } from "../services/gravity/agents/inject-agent.js";
+import { createDirectorAgent } from "../services/gravity/agents/director-agent.js";
 import { createCustomToolsStorage } from "../services/storage/custom-tools.storage.js";
 import { createLorebooksStorage } from "../services/storage/lorebooks.storage.js";
 import { createRegexScriptsStorage } from "../services/storage/regex-scripts.storage.js";
@@ -292,6 +295,9 @@ export async function generateRoutes(app: FastifyInstance) {
   const chars = createCharactersStorage(app.db);
   const agentsStore = createAgentsStorage(app.db);
   const gameStateStore = createGameStateStorage(app.db);
+  const gravityAcceptance = createGravityAcceptance(app.db);
+  const gravityInjectStore = createInjectAgent(app.db);
+  const gravityDirectorAgent = createDirectorAgent(app.db);
   const customToolsStore = createCustomToolsStorage(app.db);
   const lorebooksStore = createLorebooksStorage(app.db);
   const regexScriptsStore = createRegexScriptsStorage(app.db);
@@ -332,6 +338,12 @@ export async function generateRoutes(app: FastifyInstance) {
           const lastAsstMsg = preMessages[i]!;
           const gs = await gameStateStore.getByMessage(lastAsstMsg.id, lastAsstMsg.activeSwipeIndex);
           if (gs) await gameStateStore.commit(gs.id);
+          // Gravity: accept this swipe's staged transactions
+          await gravityAcceptance.commitAcceptedGravityTurn(
+            input.chatId,
+            lastAsstMsg.id,
+            lastAsstMsg.activeSwipeIndex,
+          );
           break;
         }
       }
@@ -3556,6 +3568,31 @@ export async function generateRoutes(app: FastifyInstance) {
               );
             }
 
+            // Gravity Ledger inject
+            const gravityInjectAgent = resolvedAgents.find((a) => a.type === "gravity-ledger-inject");
+            if (gravityInjectAgent) {
+              const gravityInject = await gravityInjectStore.loadGravityInjectForChat(input.chatId);
+              if (gravityInject) {
+                trackerParts.push(wrapContent(gravityInject.text, "Gravity Ledger", wrapFormat));
+                // sendAgentEvent is defined later in this closure — emit via SSE directly
+                reply.raw.write(
+                  `data: ${JSON.stringify({
+                    type: "agent_result",
+                    data: {
+                      agentId: gravityInjectAgent.id,
+                      agentType: "gravity-ledger-inject",
+                      type: "context_injection",
+                      data: { archiveVersion: gravityInject.archiveVersion },
+                      tokensUsed: 0,
+                      durationMs: 0,
+                      success: true,
+                      error: null,
+                    },
+                  })}\n\n`,
+                );
+              }
+            }
+
             if (trackerParts.length > 0) {
               const contextBlock =
                 wrapFormat === "none"
@@ -3602,7 +3639,13 @@ export async function generateRoutes(app: FastifyInstance) {
       // Create the pipeline (exclude editor — it runs last, after all other agents)
       const editorAgent = resolvedAgents.find((a) => a.type === "editor");
       const lorebookKeeperAgent = resolvedAgents.find((a) => a.type === "lorebook-keeper") ?? null;
-      let pipelineAgents = resolvedAgents.filter((a) => a.type !== "editor" && a.type !== "lorebook-keeper");
+      let pipelineAgents = resolvedAgents.filter(
+        (a) =>
+          a.type !== "editor" &&
+          a.type !== "lorebook-keeper" &&
+          a.type !== "gravity-ledger-inject" &&
+          a.type !== "gravity-ledger-director",
+      );
 
       // When manualTrackers is enabled, strip tracker-category agents from the
       // automatic pipeline — the user will trigger them manually via retry-agents.
@@ -6149,6 +6192,34 @@ export async function generateRoutes(app: FastifyInstance) {
             }
           } catch {
             // Non-critical — don't fail generation if editor errors
+          }
+        }
+
+        // ── Gravity Director (runs after editor — sees post-edit message text) ──
+        const gravityDirAgent = resolvedAgents.find((a) => a.type === "gravity-ledger-director");
+        if (gravityDirAgent && messageId && !abortController.signal.aborted) {
+          try {
+            const swipes = await chats.getSwipes(messageId);
+            const finalText = swipes?.find((s: { index: number }) => s.index === targetSwipeIndex)?.content ?? "";
+            const dirResult = await gravityDirectorAgent.runGravityDirector({
+              chatId: input.chatId,
+              messageId,
+              swipeIndex: targetSwipeIndex,
+              assistantMessage: finalText,
+              agentConfig: gravityDirAgent,
+              context: agentContext,
+              provider: gravityDirAgent.provider,
+              model: gravityDirAgent.model,
+              signal: abortController.signal,
+            });
+            sendAgentEvent(dirResult);
+            try {
+              await agentsStore.saveRun({ agentConfigId: gravityDirAgent.id, chatId: input.chatId, messageId, result: dirResult });
+            } catch {
+              /* Non-critical */
+            }
+          } catch (dirErr) {
+            logger.error(dirErr, "[gravity-director] failed for chat %s", input.chatId);
           }
         }
       }

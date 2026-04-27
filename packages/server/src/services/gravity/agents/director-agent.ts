@@ -24,7 +24,8 @@ import { callDirector } from "../director/client.ts";
 import type { CorrectionsPayload, CorrectionEntry } from "../director/input.ts";
 import type { RawTransaction, TurnMode } from "../engine/types.ts";
 import type { BaseLLMProvider } from "../../llm/base-provider.ts";
-import type { AgentConfig, AgentContext } from "@marinara-engine/shared";
+import type { AgentContext } from "@marinara-engine/shared";
+import type { AgentExecConfig } from "../../agents/agent-executor.ts";
 import { logger } from "../../../lib/logger.ts";
 
 export interface GravityDirectorInput {
@@ -32,7 +33,7 @@ export interface GravityDirectorInput {
   messageId: string;
   swipeIndex: number;
   assistantMessage: string;
-  agentConfig: AgentConfig;
+  agentConfig: AgentExecConfig;
   context: AgentContext;
   provider: BaseLLMProvider;
   model: string;
@@ -194,7 +195,7 @@ export function createDirectorAgent(db: DB) {
   };
 }
 
-function makeError(agentConfig: AgentConfig, message: string, t0: number): GravityDirectorResult {
+function makeError(agentConfig: AgentExecConfig, message: string, t0: number): GravityDirectorResult {
   return {
     agentId: agentConfig.id,
     agentType: "gravity-ledger-director",
