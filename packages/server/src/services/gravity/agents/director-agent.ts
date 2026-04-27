@@ -81,6 +81,20 @@ export function createDirectorAgent(db: DB) {
         ? (JSON.parse(chatState.pendingCorrections) as CorrectionsPayload)
         : null;
 
+      // ── Fix 2: honour runInterval ────────────────────────────────────────────
+      // Only fire the director every N accepted turns (default 1 = every turn).
+      const runInterval = (agentConfig.settings.runInterval as number | undefined) ?? 1;
+      const turnsSince = chatState?.userTurnsSinceLastDirector ?? 0;
+      if (runInterval > 1 && turnsSince + 1 < runInterval) {
+        logger.debug(
+          "[gravity-director] skipping turn %d/%d for chat %s",
+          turnsSince + 1,
+          runInterval,
+          chatId,
+        );
+        return makeSkipped(agentConfig, t0);
+      }
+
       // ── 3. Load last-accepted state-cache ────────────────────────────────────
       const cache = await stateCacheStore.getAcceptedCache(chatId);
       const stateView = cache?.stateView ?? "";
@@ -192,6 +206,19 @@ export function createDirectorAgent(db: DB) {
         error: null,
       };
     },
+  };
+}
+
+function makeSkipped(agentConfig: AgentExecConfig, t0: number): GravityDirectorResult {
+  return {
+    agentId: agentConfig.id,
+    agentType: "gravity-ledger-director",
+    type: "gravity_state_update",
+    data: { committed: 0, rejected: 0, errors: {}, newArrivalIds: [], durationMs: Date.now() - t0, model: "" },
+    tokensUsed: 0,
+    durationMs: Date.now() - t0,
+    success: true,
+    error: null,
   };
 }
 

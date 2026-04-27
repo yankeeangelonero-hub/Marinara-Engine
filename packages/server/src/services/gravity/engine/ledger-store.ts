@@ -63,22 +63,34 @@ export function createLedgerStore(db: DB) {
         .where(eq(gravityChatState.chatId, chatId));
       const startSeq = current?.nextTxSeq ?? 1;
 
+      // Fix 1: upsert instead of bare UPDATE so a missing row is created rather
+      // than silently dropped (happens on fresh chats with no gravity_chat_state row).
       await tx
-        .update(gravityChatState)
-        .set({ nextTxSeq: startSeq + txns.length })
-        .where(eq(gravityChatState.chatId, chatId));
+        .insert(gravityChatState)
+        .values({ chatId, nextTxSeq: startSeq + txns.length })
+        .onConflictDoUpdate({
+          target: gravityChatState.chatId,
+          set: { nextTxSeq: startSeq + txns.length },
+        });
 
+      const now = new Date().toISOString();
       await tx.insert(gravityTransactions).values(
-        txns.map((t, i) => ({
-          id: crypto.randomUUID(),
-          chatId,
-          messageId,
-          swipeIndex,
-          seq: startSeq + i,
-          op: t.op,
-          payload: JSON.stringify(t),
-          accepted: 0,
-        })),
+        txns.map((t, i) => {
+          // Fix 3: stamp engine metadata into the payload before storage so that
+          // state-compute.ts (tx.tx, last_active_tx, AMEND lookup, etc.) works
+          // correctly on DB-replayed transactions.
+          const stamped: RawTransaction = { ...t, tx: startSeq + i, _ts: now };
+          return {
+            id: crypto.randomUUID(),
+            chatId,
+            messageId,
+            swipeIndex,
+            seq: startSeq + i,
+            op: stamped.op,
+            payload: JSON.stringify(stamped),
+            accepted: 0,
+          };
+        }),
       );
     },
 

@@ -12,6 +12,37 @@ import {
 import { logger } from "../lib/logger.js";
 
 export async function gravityRoutes(app: FastifyInstance) {
+  // ── POST /init/:chatId ───────────────────────────────────────────────────
+  // Idempotent: creates the gravity_chat_state row for a chat if it doesn't
+  // exist, or returns the existing row. Must be called once when Gravity is
+  // first enabled for a chat (before any generate request fires the director).
+  app.post<{ Params: { chatId: string }; Body: { mode?: string } }>(
+    "/init/:chatId",
+    async (req, reply) => {
+      const { chatId } = req.params;
+      const mode = req.body?.mode ?? "regular";
+
+      try {
+        await app.db
+          .insert(gravityChatState)
+          .values({ chatId, mode })
+          .onConflictDoNothing();
+
+        const [row] = await app.db
+          .select()
+          .from(gravityChatState)
+          .where(eq(gravityChatState.chatId, chatId))
+          .limit(1);
+
+        logger.info("[gravity-routes] init chat=%s mode=%s", chatId, row?.mode ?? mode);
+        return reply.send({ success: true, chatId, chatState: row ?? null });
+      } catch (err) {
+        logger.error(err, "[gravity-routes] init failed for chat %s", chatId);
+        return reply.status(500).send({ error: "Init failed" });
+      }
+    },
+  );
+
   // ── GET /export/:chatId ──────────────────────────────────────────────────
   // Returns all gravity data for a chat as a portable JSON bundle.
   // By default only accepted transactions are included; pass
