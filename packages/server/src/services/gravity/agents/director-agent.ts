@@ -85,10 +85,12 @@ export function createDirectorAgent(db: DB) {
       // Only fire the director every N accepted turns (default 1 = every turn).
       const runInterval = (agentConfig.settings.runInterval as number | undefined) ?? 1;
       const turnsSince = chatState?.userTurnsSinceLastDirector ?? 0;
-      if (runInterval > 1 && turnsSince + 1 < runInterval) {
+      // commitAcceptedGravityTurn already incremented the counter before the
+      // director fires, so compare directly (no +1).
+      if (runInterval > 1 && turnsSince < runInterval) {
         logger.debug(
           "[gravity-director] skipping turn %d/%d for chat %s",
-          turnsSince + 1,
+          turnsSince,
           runInterval,
           chatId,
         );

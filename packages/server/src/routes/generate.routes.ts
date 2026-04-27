@@ -76,6 +76,7 @@ import { executeKnowledgeRetrieval } from "../services/agents/knowledge-retrieva
 import { extractFileText, getSourceFilePath } from "./knowledge-sources.routes.js";
 import { gameStateSnapshots as gameStateSnapshotsTable } from "../db/schema/index.js";
 import { chats as chatsTable } from "../db/schema/index.js";
+import { gravityChatState as gravityChatStateTable } from "../db/schema/index.js";
 import { eq, and, desc } from "drizzle-orm";
 import { PROFESSOR_MARI_ID } from "@marinara-engine/shared";
 import { chunkAndEmbedMessages, recallMemories } from "../services/memory-recall.js";
@@ -2203,6 +2204,8 @@ export async function generateRoutes(app: FastifyInstance) {
       for (const cfg of enabledConfigs) {
         // If this chat has a per-chat agent list, only include agents in that list
         if (hasPerChatAgentList && !perChatAgentSet.has(cfg.type)) continue;
+        // Skip globally-disabled agent configs (enabled is stored as "true"/"false" text)
+        if (cfg.enabled !== "true") continue;
         const settings = cfg.settings ? JSON.parse(cfg.settings as string) : {};
         let agentProvider = provider;
         let agentModel = conn.model;
@@ -2282,6 +2285,17 @@ export async function generateRoutes(app: FastifyInstance) {
         chatActiveAgentIds.join(","),
         resolvedAgents.map((a) => `${a.type}(${a.phase})`).join(", "),
       );
+
+      // Auto-init gravity_chat_state for chats that have a Gravity agent configured.
+      // Guarantees the row exists before inject or director run — even on a first turn
+      // where the director stages zero transactions (so the stageTransactions upsert
+      // never fires). onConflictDoNothing makes this a no-op after the first call.
+      const hasGravityAgent = resolvedAgents.some(
+        (a) => a.type === "gravity-ledger-inject" || a.type === "gravity-ledger-director",
+      );
+      if (hasGravityAgent) {
+        await app.db.insert(gravityChatStateTable).values({ chatId: input.chatId }).onConflictDoNothing();
+      }
 
       // Resolve character info (used for agent context AND prompt fallback)
       const charInfo: Array<{
