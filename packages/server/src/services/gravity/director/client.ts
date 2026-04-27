@@ -65,9 +65,11 @@ export async function callDirector(
   const result = await provider.chatComplete(messages, {
     model,
     temperature: 0.3,
-    // Director JSON output is rarely over 800 tokens; 1500 is a safe ceiling.
-    // Lowering this reduces reserved capacity on hosted APIs and speeds scheduling.
-    maxTokens: 1500,
+    // 4096 is necessary for thinking/reasoning models (DeepSeek, Qwen, o-series)
+    // whose <think> blocks can consume 1000–2000 tokens before the JSON starts.
+    // Non-thinking models rarely exceed 800 tokens of JSON output, so this is
+    // headroom rather than a typical bill.
+    maxTokens: 4096,
     stream: false,
     responseFormat: { type: "json_object" },
     signal,
