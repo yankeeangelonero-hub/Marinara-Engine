@@ -19,14 +19,24 @@ export interface DirectorProposal {
   durationMs: number;
 }
 
+/**
+ * Strip visible reasoning blocks emitted by models like DeepSeek R1 / Qwen.
+ * These appear as <think>…</think> or <thinking>…</thinking> before the JSON
+ * and add significant latency without contributing useful output.
+ */
+function stripThinkingBlocks(text: string): string {
+  return text.replace(/<think(?:ing)?>([\s\S]*?)<\/think(?:ing)?>/gi, "").trim();
+}
+
 /** Extract JSON from a response that may have markdown fences or leading prose. */
 function extractJson(text: string): string {
-  const fenceMatch = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
+  const stripped = stripThinkingBlocks(text);
+  const fenceMatch = stripped.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
   if (fenceMatch?.[1]) return fenceMatch[1].trim();
-  const start = text.indexOf("{");
-  const end = text.lastIndexOf("}");
-  if (start !== -1 && end > start) return text.slice(start, end + 1);
-  return text.trim();
+  const start = stripped.indexOf("{");
+  const end = stripped.lastIndexOf("}");
+  if (start !== -1 && end > start) return stripped.slice(start, end + 1);
+  return stripped;
 }
 
 export async function callDirector(
@@ -66,11 +76,27 @@ export async function callDirector(
   const raw = result.content?.trim() ?? "";
   const durationMs = Date.now() - t0;
 
+  // Log output size and whether a thinking block was present — this is the
+  // primary diagnostic for "director is slow": if thinkingChars >> jsonChars,
+  // the model is spending most of its time reasoning before emitting JSON.
+  // Switch to a non-reasoning model (Haiku, 4o-mini, Flash) to fix it.
+  const thinkMatch = raw.match(/<think(?:ing)?>([\s\S]*?)<\/think(?:ing)?>/i);
+  const thinkingChars = thinkMatch ? thinkMatch[0].length : 0;
+  const jsonChars = raw.length - thinkingChars;
+  logger.info(
+    "[gravity-director] raw response: %d chars total, %d thinking, %d json, %dms model=%s",
+    raw.length,
+    thinkingChars,
+    jsonChars,
+    durationMs,
+    model,
+  );
+
   let parsed: { transactions?: unknown[]; notes?: string; confidence?: string };
   try {
     parsed = JSON.parse(extractJson(raw)) as { transactions?: unknown[]; notes?: string; confidence?: string };
   } catch {
-    logger.warn("[gravity-director] JSON parse failed, raw=%s", raw.slice(0, 200));
+    logger.warn("[gravity-director] JSON parse failed, raw=%s", raw.slice(0, 300));
     parsed = { transactions: [], notes: "parse error", confidence: "low" };
   }
 
