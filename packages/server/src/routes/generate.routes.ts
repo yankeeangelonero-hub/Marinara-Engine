@@ -2201,11 +2201,17 @@ export async function generateRoutes(app: FastifyInstance) {
         }
       }
 
+      // Track types explicitly disabled so the built-in fallback pass cannot re-add them.
+      const disabledAgentTypes = new Set<string>();
+
       for (const cfg of enabledConfigs) {
         // If this chat has a per-chat agent list, only include agents in that list
         if (hasPerChatAgentList && !perChatAgentSet.has(cfg.type)) continue;
         // Skip globally-disabled agent configs (enabled is stored as "true"/"false" text)
-        if (cfg.enabled !== "true") continue;
+        if (cfg.enabled !== "true") {
+          disabledAgentTypes.add(cfg.type);
+          continue;
+        }
         const settings = cfg.settings ? JSON.parse(cfg.settings as string) : {};
         let agentProvider = provider;
         let agentModel = conn.model;
@@ -2256,6 +2262,8 @@ export async function generateRoutes(app: FastifyInstance) {
         chatEnableAgents && hasPerChatAgentList
           ? BUILT_IN_AGENTS.filter((a) => {
               if (resolvedTypes.has(a.id)) return false;
+              // Never re-add a type that was explicitly disabled in its config row.
+              if (disabledAgentTypes.has(a.id)) return false;
               if (a.id === "chat-summary") return false;
               return perChatAgentSet.has(a.id);
             })
