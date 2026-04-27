@@ -17,6 +17,7 @@ import {
   Trash2,
   Sparkles,
   MessageCircle,
+  Network,
   Swords,
   RefreshCw,
   BarChart3,
@@ -26,6 +27,7 @@ import { cn } from "../../lib/utils";
 import { api } from "../../lib/api-client";
 import { useGameStateStore } from "../../stores/game-state.store";
 import { useAgentStore } from "../../stores/agent.store";
+import { useGravityStore } from "../../stores/gravity.store";
 import { useAgentConfigs } from "../../hooks/use-agents";
 import { useUIStore } from "../../stores/ui.store";
 import type {
@@ -71,6 +73,9 @@ const CustomTrackerPanel = lazy(async () =>
 );
 const CombinedWorldPanel = lazy(async () =>
   import("./RoleplayHUDPanels").then((module) => ({ default: module.CombinedWorldPanel })),
+);
+const GravityLedgerPanel = lazy(async () =>
+  import("./RoleplayHUDPanels").then((module) => ({ default: module.GravityLedgerPanel })),
 );
 
 export function RoleplayHUD({
@@ -346,6 +351,11 @@ export function RoleplayHUD({
           />
         )}
 
+        {(enabledAgentTypes.has("gravity-ledger-inject") ||
+          enabledAgentTypes.has("gravity-ledger-director")) && (
+          <GravityLedgerWidget chatId={chatId} layout={layout} />
+        )}
+
         {/* Manual tracker trigger button (mobile) */}
         {manualTrackers && onRetriggerTrackers && (
           <button
@@ -423,6 +433,11 @@ export function RoleplayHUD({
             onUpdate={(fields) => patchPlayerStats("customTrackerFields", fields)}
             layout={layout}
           />
+        )}
+
+        {(enabledAgentTypes.has("gravity-ledger-inject") ||
+          enabledAgentTypes.has("gravity-ledger-director")) && (
+          <GravityLedgerWidget chatId={chatId} layout={layout} />
         )}
 
         {/* Manual tracker trigger button (desktop) */}
@@ -716,6 +731,55 @@ function CombinedPlayerWidget({
             onUpdateCustomTracker={onUpdateCustomTracker}
             onClose={() => setOpen(false)}
           />
+        </Suspense>
+      </WidgetPopover>
+    </div>
+  );
+}
+
+// ── Gravity Ledger Widget ────────────────────
+
+function GravityLedgerWidget({ chatId, layout = "top" }: { chatId: string; layout?: HudPosition }) {
+  const [open, setOpen] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const totalCommitted = useGravityStore((s) => s.totalCommitted);
+  const lastResult = useGravityStore((s) => s.lastDirectorResult);
+  const hasArrivals = (lastResult?.newArrivalIds.length ?? 0) > 0;
+
+  return (
+    <div className="relative">
+      <button
+        ref={buttonRef}
+        onClick={() => setOpen(!open)}
+        className={cn(WIDGET, "text-teal-300", open && "bg-black/60 border-white/20")}
+        title="Gravity Ledger"
+      >
+        <div className="relative flex items-center justify-center h-7 max-md:h-auto shrink-0">
+          <Network size="0.875rem" className="text-teal-400/70 max-md:h-4 max-md:w-4" />
+          {hasArrivals && (
+            <span className="absolute -top-0.5 -right-0.5 h-1.5 w-1.5 rounded-full bg-amber-400 animate-pulse" />
+          )}
+        </div>
+        {totalCommitted > 0 ? (
+          <span className="text-[0.4375rem] font-bold text-teal-300/70 tabular-nums shrink-0">
+            {totalCommitted}
+          </span>
+        ) : (
+          <span className="text-[0.5625rem] font-semibold leading-tight text-teal-300/50 shrink-0 max-md:hidden">
+            Gravity
+          </span>
+        )}
+      </button>
+
+      <WidgetPopover
+        open={open}
+        onClose={() => setOpen(false)}
+        anchorRef={buttonRef}
+        placement={layout === "left" ? "right" : layout === "right" ? "left" : "bottom"}
+        className="w-80 max-h-[min(75vh,36rem)] overflow-hidden flex flex-col"
+      >
+        <Suspense fallback={<DeferredHUDPanelFallback label="Loading ledger…" />}>
+          <GravityLedgerPanel chatId={chatId} onClose={() => setOpen(false)} />
         </Suspense>
       </WidgetPopover>
     </div>

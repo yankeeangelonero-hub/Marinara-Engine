@@ -43,6 +43,46 @@ export async function gravityRoutes(app: FastifyInstance) {
     },
   );
 
+  // ── GET /state/:chatId ──────────────────────────────────────────────────
+  // Returns the current accepted state view for the widget panel.
+  app.get<{ Params: { chatId: string } }>("/state/:chatId", async (req, reply) => {
+    const { chatId } = req.params;
+    try {
+      const [chatState] = await app.db
+        .select()
+        .from(gravityChatState)
+        .where(eq(gravityChatState.chatId, chatId))
+        .limit(1);
+
+      if (!chatState?.acceptedMessageId) {
+        return reply.send({ initialized: false, mode: "regular", stateView: "", archiveVersion: "", nextTxSeq: 1 });
+      }
+
+      const [cache] = await app.db
+        .select()
+        .from(gravityStateCache)
+        .where(
+          and(
+            eq(gravityStateCache.chatId, chatId),
+            eq(gravityStateCache.messageId, chatState.acceptedMessageId),
+            eq(gravityStateCache.swipeIndex, chatState.acceptedSwipeIndex ?? 0),
+          ),
+        )
+        .limit(1);
+
+      return reply.send({
+        initialized: true,
+        mode: chatState.mode,
+        stateView: cache?.stateView ?? "",
+        archiveVersion: cache?.archiveVersion ?? "",
+        nextTxSeq: chatState.nextTxSeq,
+      });
+    } catch (err) {
+      logger.error(err, "[gravity-routes] state fetch failed for chat %s", chatId);
+      return reply.status(500).send({ error: "State fetch failed" });
+    }
+  });
+
   // ── GET /export/:chatId ──────────────────────────────────────────────────
   // Returns all gravity data for a chat as a portable JSON bundle.
   // By default only accepted transactions are included; pass

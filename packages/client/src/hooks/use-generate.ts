@@ -145,6 +145,7 @@ async function buildPendingCardUpdates(
 }
 import { useChatStore } from "../stores/chat.store";
 import { useAgentStore } from "../stores/agent.store";
+import { useGravityStore } from "../stores/gravity.store";
 import { useGameModeStore } from "../stores/game-mode.store";
 import { useGameStateStore } from "../stores/game-state.store";
 import { useTranslationStore } from "../stores/translation.store";
@@ -328,6 +329,8 @@ export function useGenerate() {
   const setFailedAgentTypes = useAgentStore((s) => s.setFailedAgentTypes);
   const clearFailedAgentTypes = useAgentStore((s) => s.clearFailedAgentTypes);
   const setGameState = useGameStateStore((s) => s.setGameState);
+  const setGravityDirectorResult = useGravityStore((s) => s.setDirectorResult);
+  const setGravityArchiveVersion = useGravityStore((s) => s.setArchiveVersion);
 
   const generate = useCallback(
     async (params: {
@@ -730,6 +733,24 @@ export function useGenerate() {
                   if (choices.length > 0) {
                     setCyoaChoices(choices);
                   }
+                }
+
+                // Push Gravity Ledger director result to the gravity store
+                if (result.agentType === "gravity-ledger-director") {
+                  const d = result.data as Record<string, unknown>;
+                  setGravityDirectorResult({
+                    committed: (d.committed as number) ?? 0,
+                    rejected: (d.rejected as number) ?? 0,
+                    newArrivalIds: (d.newArrivalIds as string[]) ?? [],
+                    durationMs: result.durationMs,
+                    model: (d.model as string) ?? "",
+                  });
+                }
+
+                // Push Gravity inject archive version to the gravity store
+                if (result.agentType === "gravity-ledger-inject") {
+                  const d = result.data as Record<string, unknown>;
+                  if (d.archiveVersion) setGravityArchiveVersion(d.archiveVersion as string);
                 }
               }
 
@@ -1410,6 +1431,8 @@ export function useGenerate() {
       clearFailedAgentTypes,
       setFailedAgentTypes,
       setGameState,
+      setGravityDirectorResult,
+      setGravityArchiveVersion,
     ],
   );
 
@@ -1544,6 +1567,21 @@ export function useGenerate() {
                     setGameState(merged as any);
                   }
                 }
+                // Gravity Ledger store updates (second agent_result handler)
+                if (result.agentType === "gravity-ledger-director") {
+                  const d = result.data as Record<string, unknown>;
+                  setGravityDirectorResult({
+                    committed: (d.committed as number) ?? 0,
+                    rejected: (d.rejected as number) ?? 0,
+                    newArrivalIds: (d.newArrivalIds as string[]) ?? [],
+                    durationMs: result.durationMs,
+                    model: (d.model as string) ?? "",
+                  });
+                }
+                if (result.agentType === "gravity-ledger-inject") {
+                  const d = result.data as Record<string, unknown>;
+                  if (d.archiveVersion) setGravityArchiveVersion(d.archiveVersion as string);
+                }
               }
               if (!result.success && result.error) {
                 showError(`${result.agentName ?? result.agentType} failed: ${result.error}`);
@@ -1647,6 +1685,8 @@ export function useGenerate() {
       setFailedAgentTypes,
       setProcessing,
       setGameState,
+      setGravityDirectorResult,
+      setGravityArchiveVersion,
       qc,
     ],
   );
@@ -1731,6 +1771,17 @@ function formatAgentBubble(agentType: string, agentName: string, data: unknown):
       const reactions = (d.reactions as any[]) ?? [];
       if (!reactions.length) return null;
       return reactions.map((r: any) => `💬 ${r.characterName}: ${r.reaction}`).join("\n");
+    }
+
+    case "gravity-ledger-director": {
+      const committed = (d.committed as number) ?? 0;
+      const rejected = (d.rejected as number) ?? 0;
+      const arrivals = (d.newArrivalIds as string[]) ?? [];
+      if (committed === 0 && rejected === 0) return null;
+      const parts = [`⚖️ ${committed} committed`];
+      if (rejected > 0) parts.push(`${rejected} rejected`);
+      if (arrivals.length > 0) parts.push(`⚡ ${arrivals.length} arrival${arrivals.length > 1 ? "s" : ""}`);
+      return parts.join(" · ");
     }
 
     case "spotify": {

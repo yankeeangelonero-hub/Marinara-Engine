@@ -7,9 +7,11 @@ import {
   CloudSun,
   ImagePlus,
   MapPin,
+  Network,
   Package,
   Pencil,
   Plus,
+  RefreshCw,
   Scroll,
   Sparkles,
   SlidersHorizontal,
@@ -22,6 +24,7 @@ import {
 import { cn } from "../../lib/utils";
 import { api } from "../../lib/api-client";
 import { useAgentConfigs, useUpdateAgent, type AgentConfigRow } from "../../hooks/use-agents";
+import { useGravityStore } from "../../stores/gravity.store";
 import type {
   CharacterStat,
   CustomTrackerField,
@@ -1239,6 +1242,111 @@ function WorldFieldRow({
           <Pencil size="0.625rem" />
         </button>
       )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════
+// Gravity Ledger Panel
+// ═══════════════════════════════════════════════
+
+interface GravityStateResponse {
+  initialized: boolean;
+  mode: string;
+  stateView: string;
+  archiveVersion: string;
+  nextTxSeq: number;
+}
+
+export function GravityLedgerPanel({ chatId, onClose }: { chatId: string; onClose: () => void }) {
+  const [stateData, setStateData] = useState<GravityStateResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const lastResult = useGravityStore((s) => s.lastDirectorResult);
+  const totalCommitted = useGravityStore((s) => s.totalCommitted);
+
+  const fetchState = () => {
+    setLoading(true);
+    api
+      .get<GravityStateResponse>(`/gravity/state/${chatId}`)
+      .then((data) => setStateData(data))
+      .catch(() => setStateData(null))
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    fetchState();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chatId]);
+
+  return (
+    <div className="flex flex-col min-w-0">
+      {/* Header */}
+      <div className="flex items-center justify-between px-3 py-2.5 border-b border-white/10 shrink-0">
+        <div className="flex items-center gap-1.5">
+          <Network size="0.875rem" className="text-teal-400/70 shrink-0" />
+          <span className="text-[0.6875rem] font-semibold text-white/80">Gravity Ledger</span>
+          {stateData?.initialized && (
+            <span className="text-[0.5rem] font-mono uppercase text-white/30 ml-1">{stateData.mode}</span>
+          )}
+        </div>
+        <div className="flex items-center gap-1.5">
+          {stateData?.initialized && (
+            <span className="text-[0.5rem] text-white/25 tabular-nums">
+              {(stateData.nextTxSeq ?? 1) - 1} tx
+            </span>
+          )}
+          <button
+            onClick={fetchState}
+            className="text-white/20 hover:text-white/60 transition-colors"
+            title="Refresh state"
+          >
+            <RefreshCw size="0.625rem" className={loading ? "animate-spin" : ""} />
+          </button>
+          <button onClick={onClose} className="text-white/20 hover:text-white/60 transition-colors" title="Close">
+            <X size="0.625rem" />
+          </button>
+        </div>
+      </div>
+
+      {/* Last director run stats */}
+      {lastResult && (lastResult.committed > 0 || lastResult.rejected > 0) && (
+        <div className="flex items-center gap-3 px-3 py-1.5 border-b border-white/5 text-[0.5625rem]">
+          <span className="text-teal-400/80 font-medium">+{lastResult.committed} committed</span>
+          {lastResult.rejected > 0 && (
+            <span className="text-red-400/60">{lastResult.rejected} rejected</span>
+          )}
+          {lastResult.newArrivalIds.length > 0 && (
+            <span className="text-amber-400/70">⚡ {lastResult.newArrivalIds.length} arrival</span>
+          )}
+          {totalCommitted > 0 && (
+            <span className="ml-auto text-white/20 tabular-nums">{totalCommitted} total</span>
+          )}
+        </div>
+      )}
+
+      {/* State view */}
+      <div className="overflow-y-auto p-3 flex-1">
+        {loading ? (
+          <div className="flex items-center justify-center gap-1.5 py-6 text-[0.5625rem] text-white/30">
+            <RefreshCw size="0.625rem" className="animate-spin" />
+            Loading state…
+          </div>
+        ) : !stateData?.initialized ? (
+          <div className="py-6 text-center text-[0.5625rem] text-white/30 leading-relaxed">
+            No accepted state yet.
+            <br />
+            Send a message to initialize the ledger.
+          </div>
+        ) : stateData.stateView ? (
+          <pre className="text-[0.5625rem] font-mono leading-relaxed text-white/65 whitespace-pre-wrap break-words">
+            {stateData.stateView}
+          </pre>
+        ) : (
+          <div className="py-6 text-center text-[0.5625rem] text-white/30">
+            State initialized but empty.
+          </div>
+        )}
+      </div>
     </div>
   );
 }
