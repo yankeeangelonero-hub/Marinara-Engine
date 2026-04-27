@@ -2,7 +2,7 @@
 // Routes: Gravity Ledger (export / import)
 // ──────────────────────────────────────────────
 import type { FastifyInstance } from "fastify";
-import { eq, and } from "drizzle-orm";
+import { eq, and, desc } from "drizzle-orm";
 import {
   gravityTransactions,
   gravityStateCache,
@@ -54,28 +54,47 @@ export async function gravityRoutes(app: FastifyInstance) {
         .where(eq(gravityChatState.chatId, chatId))
         .limit(1);
 
-      if (!chatState?.acceptedMessageId) {
-        return reply.send({ initialized: false, mode: "regular", stateView: "", archiveVersion: "", nextTxSeq: 1 });
+      // Try accepted cache first; fall back to most-recent staged cache so the
+      // widget shows state immediately after turn 1 (before the next user message
+      // triggers acceptance).
+      let cache: typeof gravityStateCache.$inferSelect | undefined;
+
+      if (chatState?.acceptedMessageId) {
+        const [row] = await app.db
+          .select()
+          .from(gravityStateCache)
+          .where(
+            and(
+              eq(gravityStateCache.chatId, chatId),
+              eq(gravityStateCache.messageId, chatState.acceptedMessageId),
+              eq(gravityStateCache.swipeIndex, chatState.acceptedSwipeIndex ?? 0),
+            ),
+          )
+          .limit(1);
+        cache = row;
       }
 
-      const [cache] = await app.db
-        .select()
-        .from(gravityStateCache)
-        .where(
-          and(
-            eq(gravityStateCache.chatId, chatId),
-            eq(gravityStateCache.messageId, chatState.acceptedMessageId),
-            eq(gravityStateCache.swipeIndex, chatState.acceptedSwipeIndex ?? 0),
-          ),
-        )
-        .limit(1);
+      if (!cache) {
+        // No accepted turn yet — grab the most recently written cache row (staged).
+        const [row] = await app.db
+          .select()
+          .from(gravityStateCache)
+          .where(eq(gravityStateCache.chatId, chatId))
+          .orderBy(desc(gravityStateCache.messageId))
+          .limit(1);
+        cache = row;
+      }
+
+      if (!cache) {
+        return reply.send({ initialized: false, mode: chatState?.mode ?? "regular", stateView: "", archiveVersion: "", nextTxSeq: chatState?.nextTxSeq ?? 1 });
+      }
 
       return reply.send({
         initialized: true,
-        mode: chatState.mode,
-        stateView: cache?.stateView ?? "",
-        archiveVersion: cache?.archiveVersion ?? "",
-        nextTxSeq: chatState.nextTxSeq,
+        mode: chatState?.mode ?? "regular",
+        stateView: cache.stateView,
+        archiveVersion: cache.archiveVersion,
+        nextTxSeq: chatState?.nextTxSeq ?? 1,
       });
     } catch (err) {
       logger.error(err, "[gravity-routes] state fetch failed for chat %s", chatId);
