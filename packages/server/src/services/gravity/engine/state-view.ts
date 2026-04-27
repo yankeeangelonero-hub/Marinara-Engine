@@ -803,6 +803,6 @@ export function buildNudge(mode: TurnMode, _state: GravityState): string {
 /**
  * Serialize the last N accepted transactions for the recent-tail cache column.
  */
-export function buildRecentTail(txns: RawTransaction[], n = 20): string {
+export function buildRecentTail(txns: RawTransaction[], n = 10): string {
   return JSON.stringify(txns.slice(-n));
 }

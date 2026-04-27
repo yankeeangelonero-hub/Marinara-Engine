@@ -55,7 +55,9 @@ export async function callDirector(
   const result = await provider.chatComplete(messages, {
     model,
     temperature: 0.3,
-    maxTokens: 4096,
+    // Director JSON output is rarely over 800 tokens; 1500 is a safe ceiling.
+    // Lowering this reduces reserved capacity on hosted APIs and speeds scheduling.
+    maxTokens: 1500,
     stream: false,
     responseFormat: { type: "json_object" },
     signal,

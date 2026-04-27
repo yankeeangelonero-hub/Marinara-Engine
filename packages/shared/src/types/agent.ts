@@ -491,7 +491,7 @@ export const BUILT_IN_AGENT_RUN_INTERVAL_DEFAULTS: Readonly<Record<string, numbe
   director: 5,
   "lorebook-keeper": 8,
   "chat-summary": 5,
-  "gravity-ledger-director": 1,
+  "gravity-ledger-director": 3,
 };
 
 export function getDefaultBuiltInAgentSettings(agentType: string): Record<string, unknown> {
