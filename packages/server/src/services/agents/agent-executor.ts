@@ -545,7 +545,7 @@ function parseBatchResponse(
 
     if (matchedOutput !== null) {
       const parsedResult = parseAgentResponse(config.type, matchedOutput);
-      const parsedResultFailed =
+      const parseFailed =
         typeof parsedResult.data === "object" &&
         parsedResult.data !== null &&
         (parsedResult.data as { parseError?: boolean }).parseError === true;
@@ -556,8 +556,8 @@ function parseBatchResponse(
         data: parsedResult.data,
         tokensUsed: perAgentTokens,
         durationMs: perAgentDuration,
-        success: !parsedResultFailed,
-        error: parsedResultFailed
+        success: !parseFailed,
+        error: parseFailed
           ? `Failed to parse agent response: ${
               (parsedResult.data as { errorMessage?: string }).errorMessage ?? "invalid JSON"
             }`

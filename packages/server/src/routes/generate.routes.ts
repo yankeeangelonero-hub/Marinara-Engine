@@ -6400,38 +6400,31 @@ export async function generateRoutes(app: FastifyInstance) {
           if (result.success && result.type === "haptic_command" && result.data && typeof result.data === "object") {
             try {
               const hData = result.data as Record<string, unknown>;
-              if (hData.parseError) {
-                logger.warn(
-                  "[haptic] Agent output could not be parsed as JSON: %s",
-                  (hData.raw as string)?.slice(0, 200),
-                );
-              } else {
-                const cmds = hData.commands as Array<Record<string, unknown>> | undefined;
-                if (cmds && cmds.length > 0) {
-                  const { hapticService } = await import("../services/haptic/buttplug-service.js");
-                  if (hapticService.connected) {
-                    for (const cmd of cmds) {
-                      await hapticService.executeCommand({
-                        deviceIndex: (cmd.deviceIndex as number | "all") ?? "all",
-                        action: (cmd.action as string) ?? "vibrate",
-                        intensity: typeof cmd.intensity === "number" ? cmd.intensity : 0.5,
-                        duration: typeof cmd.duration === "number" ? cmd.duration : undefined,
-                      } as any);
-                    }
-                    reply.raw.write(
-                      `data: ${JSON.stringify({ type: "haptic_command", data: { commands: cmds, reasoning: hData.reasoning } })}\n\n`,
-                    );
-                    logger.info(`[haptic] Agent executed ${cmds.length} command(s): ${hData.reasoning ?? ""}`);
-                  } else {
-                    logger.warn(
-                      `[haptic] Agent produced ${cmds.length} command(s) but Intiface Central is disconnected — commands dropped`,
-                    );
+              const cmds = hData.commands as Array<Record<string, unknown>> | undefined;
+              if (cmds && cmds.length > 0) {
+                const { hapticService } = await import("../services/haptic/buttplug-service.js");
+                if (hapticService.connected) {
+                  for (const cmd of cmds) {
+                    await hapticService.executeCommand({
+                      deviceIndex: (cmd.deviceIndex as number | "all") ?? "all",
+                      action: (cmd.action as string) ?? "vibrate",
+                      intensity: typeof cmd.intensity === "number" ? cmd.intensity : 0.5,
+                      duration: typeof cmd.duration === "number" ? cmd.duration : undefined,
+                    } as any);
                   }
+                  reply.raw.write(
+                    `data: ${JSON.stringify({ type: "haptic_command", data: { commands: cmds, reasoning: hData.reasoning } })}\n\n`,
+                  );
+                  logger.info(`[haptic] Agent executed ${cmds.length} command(s): ${hData.reasoning ?? ""}`);
                 } else {
-                  logger.debug(
-                    `[haptic] Agent returned no commands (reasoning: ${(hData.reasoning as string) ?? "none"})`,
+                  logger.warn(
+                    `[haptic] Agent produced ${cmds.length} command(s) but Intiface Central is disconnected — commands dropped`,
                   );
                 }
+              } else {
+                logger.debug(
+                  `[haptic] Agent returned no commands (reasoning: ${(hData.reasoning as string) ?? "none"})`,
+                );
               }
             } catch (hapErr) {
               logger.error(hapErr, "[haptic] Agent command execution failed");
@@ -6450,7 +6443,7 @@ export async function generateRoutes(app: FastifyInstance) {
 
             // Always log what the illustrator decided
             logger.debug(
-              `[illustrator] shouldGenerate=${shouldGenerate}, reason="${(illData.reason as string) ?? "none"}", prompt="${imagePrompt.slice(0, 500) || "(empty)"}"${illData.parseError ? " [JSON PARSE ERROR — raw: " + ((illData.raw as string) ?? "").slice(0, 300) + "]" : ""}`,
+              `[illustrator] shouldGenerate=${shouldGenerate}, reason="${(illData.reason as string) ?? "none"}", prompt="${imagePrompt.slice(0, 500) || "(empty)"}"`,
             );
 
             if (shouldGenerate && imagePrompt) {
