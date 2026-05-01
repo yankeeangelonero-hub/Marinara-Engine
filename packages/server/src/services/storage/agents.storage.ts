@@ -287,6 +287,54 @@ export function createAgentsStorage(db: DB) {
       }
     },
 
+    /**
+     * Set multiple memory keys for an agent in a chat in a single batch.
+     * Existing keys are updated; missing keys are inserted.
+     *
+     * Deliberately avoids db.transaction() — libSQL's stateful transaction
+     * objects trigger a use-after-free / race on Windows when the loop is
+     * large, causing an access-violation crash (see #73). Writes happen
+     * sequentially on the bare `db` connection. Callers tolerant of torn
+     * state on a mid-batch crash should use this helper; callers needing
+     * stricter atomicity must implement their own scheme.
+     */
+    async setMemoryBatch(agentConfigId: string, chatId: string, entries: Record<string, unknown>) {
+      const resolvedAgentConfigId = await resolveAgentConfigId(agentConfigId);
+      const keys = Object.keys(entries);
+      if (keys.length === 0) return;
+
+      for (const key of keys) {
+        const value = entries[key];
+        const stringValue = typeof value === "string" ? value : JSON.stringify(value);
+        const existing = await db
+          .select()
+          .from(agentMemory)
+          .where(
+            and(
+              eq(agentMemory.agentConfigId, resolvedAgentConfigId),
+              eq(agentMemory.chatId, chatId),
+              eq(agentMemory.key, key),
+            ),
+          );
+
+        if (existing.length > 0) {
+          await db
+            .update(agentMemory)
+            .set({ value: stringValue, updatedAt: now() })
+            .where(eq(agentMemory.id, existing[0]!.id));
+        } else {
+          await db.insert(agentMemory).values({
+            id: newId(),
+            agentConfigId: resolvedAgentConfigId,
+            chatId,
+            key,
+            value: stringValue,
+            updatedAt: now(),
+          });
+        }
+      }
+    },
+
     /** Delete echo chamber message runs for a specific chat. */
     async clearEchoMessages(chatId: string) {
       await db.delete(agentRuns).where(and(eq(agentRuns.chatId, chatId), eq(agentRuns.resultType, "echo_message")));
