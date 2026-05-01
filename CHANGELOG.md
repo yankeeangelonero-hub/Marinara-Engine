@@ -2,6 +2,12 @@
 
 This file is the release-notes source of truth for Marinara Engine. Reuse these entries when publishing GitHub Releases for tags in the `vX.Y.Z` format.
 
+## [Unreleased]
+
+### Added
+
+- **Thread Weaver agent** — new built-in pre-generation agent that drives narrative through structured plot threads with timed fuses. Plants threads in 6 categories (adversary, social, mystery, opportunity, environment, internal), fires/evolves/invalidates them when fuses expire, and supports off-screen "meanwhile" cutaways. Includes a debug-drawer panel for active threads, a graveyard with revive, and manual planting/force-fire. Pairs with Secret Plot Driver as the tactical layer to its strategic arc.
+
 ## [1.5.6]
 
 ### Added
