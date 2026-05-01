@@ -166,6 +166,10 @@ export async function executeAgent(
 
     // Parse the result based on agent type
     const parsed = parseAgentResponse(config.type, responseText);
+    const parseFailed =
+      typeof parsed.data === "object" &&
+      parsed.data !== null &&
+      (parsed.data as { parseError?: boolean }).parseError === true;
 
     return {
       agentId: config.id,
@@ -174,8 +178,12 @@ export async function executeAgent(
       data: parsed.data,
       tokensUsed: result.usage?.totalTokens ?? 0,
       durationMs,
-      success: true,
-      error: null,
+      success: !parseFailed,
+      error: parseFailed
+        ? `Failed to parse agent response: ${
+            (parsed.data as { errorMessage?: string }).errorMessage ?? "invalid JSON"
+          }`
+        : null,
     };
   } catch (err) {
     return makeError(config, extractErrorMessage(err), startTime);
@@ -219,6 +227,10 @@ async function executeAgentWithTools(
     if (!result.toolCalls || result.toolCalls.length === 0) {
       const responseText = result.content?.trim() ?? "";
       const parsed = parseAgentResponse(config.type, responseText);
+      const parseFailed =
+        typeof parsed.data === "object" &&
+        parsed.data !== null &&
+        (parsed.data as { parseError?: boolean }).parseError === true;
       return {
         agentId: config.id,
         agentType: config.type,
@@ -226,8 +238,12 @@ async function executeAgentWithTools(
         data: parsed.data,
         tokensUsed: totalTokens,
         durationMs: Date.now() - startTime,
-        success: true,
-        error: null,
+        success: !parseFailed,
+        error: parseFailed
+          ? `Failed to parse agent response: ${
+              (parsed.data as { errorMessage?: string }).errorMessage ?? "invalid JSON"
+            }`
+          : null,
       };
     }
 
@@ -275,6 +291,10 @@ async function executeAgentWithTools(
   totalTokens += finalResult.usage?.totalTokens ?? 0;
   const responseText = finalResult.content?.trim() ?? "";
   const parsed = parseAgentResponse(config.type, responseText);
+  const parseFailed =
+    typeof parsed.data === "object" &&
+    parsed.data !== null &&
+    (parsed.data as { parseError?: boolean }).parseError === true;
   return {
     agentId: config.id,
     agentType: config.type,
@@ -282,8 +302,12 @@ async function executeAgentWithTools(
     data: parsed.data,
     tokensUsed: totalTokens,
     durationMs: Date.now() - startTime,
-    success: true,
-    error: null,
+    success: !parseFailed,
+    error: parseFailed
+      ? `Failed to parse agent response: ${
+          (parsed.data as { errorMessage?: string }).errorMessage ?? "invalid JSON"
+        }`
+      : null,
   };
 }
 
@@ -521,6 +545,10 @@ function parseBatchResponse(
 
     if (matchedOutput !== null) {
       const parsedResult = parseAgentResponse(config.type, matchedOutput);
+      const parsedResultFailed =
+        typeof parsedResult.data === "object" &&
+        parsedResult.data !== null &&
+        (parsedResult.data as { parseError?: boolean }).parseError === true;
       parsed.push({
         agentId: config.id,
         agentType: config.type,
@@ -528,8 +556,12 @@ function parseBatchResponse(
         data: parsedResult.data,
         tokensUsed: perAgentTokens,
         durationMs: perAgentDuration,
-        success: true,
-        error: null,
+        success: !parsedResultFailed,
+        error: parsedResultFailed
+          ? `Failed to parse agent response: ${
+              (parsedResult.data as { errorMessage?: string }).errorMessage ?? "invalid JSON"
+            }`
+          : null,
       });
     } else {
       // Could not find this agent's output — mark for individual retry
@@ -900,6 +932,13 @@ function buildAgentExtras(context: AgentContext, agentTypes: string[] = []): str
     parts.push(`</secret_plot_state>`);
   }
 
+  // Thread Weaver — inject pre-serialized state from the routes layer.
+  // The routes layer (generate.routes.ts) puts the serialized blocks under this key
+  // after running thread-weaver.preparePrePass + serializeAgentContext.
+  if (context.memory._threadWeaverContext) {
+    parts.push(context.memory._threadWeaverContext as string);
+  }
+
   return parts.join("\n");
 }
 
@@ -928,6 +967,7 @@ const AGENT_RESULT_TYPE_MAP: Record<string, AgentResultType> = {
   haptic: "haptic_command",
   cyoa: "cyoa_choices",
   "secret-plot-driver": "secret_plot",
+  "thread-weaver": "thread_weaver_update",
 };
 
 /** Agents that return structured JSON. */
@@ -952,6 +992,7 @@ const JSON_AGENTS = new Set([
   "haptic",
   "cyoa",
   "secret-plot-driver",
+  "thread-weaver",
 ]);
 
 /**
@@ -965,8 +1006,13 @@ function parseAgentResponse(agentType: string, responseText: string): { type: Ag
       const jsonStr = extractJson(responseText);
       const data = JSON.parse(jsonStr);
       return { type: resultType, data };
-    } catch {
-      return { type: resultType, data: { raw: responseText, parseError: true } };
+    } catch (err) {
+      // Surface a structured parse error rather than a silent success.
+      // The caller should detect the parseError flag and mark the run failed.
+      return {
+        type: resultType,
+        data: { raw: responseText, parseError: true, errorMessage: err instanceof Error ? err.message : String(err) },
+      };
     }
   }
 
