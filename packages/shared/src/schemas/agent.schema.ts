@@ -24,6 +24,7 @@ export const agentResultTypeSchema = z.enum([
   "chat_summary",
   "spotify_control",
   "secret_plot",
+  "thread_weaver_update",
 ]);
 
 export const createAgentConfigSchema = z.object({

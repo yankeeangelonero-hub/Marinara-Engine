@@ -37,7 +37,8 @@ export type AgentResultType =
   | "game_master_narration"
   | "party_action"
   | "game_map_update"
-  | "game_state_transition";
+  | "game_state_transition"
+  | "thread_weaver_update";
 
 /** Configuration for a single agent. */
 export interface AgentConfig {
@@ -179,6 +180,7 @@ export const BUILT_IN_AGENT_IDS = {
   SECRET_PLOT_DRIVER: "secret-plot-driver",
   GAME_MASTER: "game-master",
   PARTY_PLAYER: "party-player",
+  THREAD_WEAVER: "thread-weaver",
 } as const;
 
 export type AgentCategory = "writer" | "tracker" | "misc";
@@ -452,6 +454,15 @@ export const BUILT_IN_AGENTS: BuiltInAgentMeta[] = [
     defaultInjectAsSection: true,
     category: "writer",
   },
+  {
+    id: "thread-weaver",
+    name: "Thread Weaver",
+    description:
+      "Drives narrative through structured plot threads with timed fuses. Plants threads in categories (adversary, social, mystery, opportunity, environment, internal) with immediate/short/long fuses. When fuses hit zero, decides per-thread whether to fire on-scene, fire as a meanwhile cutaway, evolve (revise + re-fuse), or invalidate. Pairs well with Automated Chat Summary for long chats. Best with Secret Plot Driver enabled too — Thread Weaver acts as the tactical layer to its strategic arc.",
+    phase: "pre_generation",
+    enabledByDefault: false,
+    category: "writer",
+  },
 
   // ── Game Agents ──
   {
@@ -494,6 +505,10 @@ export function getDefaultBuiltInAgentSettings(agentType: string): Record<string
     settings.runInterval = runInterval;
   }
 
+  if (agentType === "thread-weaver") {
+    Object.assign(settings, THREAD_WEAVER_DEFAULT_SETTINGS);
+  }
+
   return settings;
 }
 
@@ -534,6 +549,7 @@ export const DEFAULT_AGENT_TOOLS: Record<string, string[]> = {
   haptic: [],
   cyoa: [],
   "secret-plot-driver": [],
+  "thread-weaver": [],
   "game-master": ["roll_dice", "update_game_state"],
   "party-player": [],
 };
@@ -596,6 +612,100 @@ export interface CharacterCardFieldUpdate {
 /** Data shape for a character_card_update agent result. */
 export interface CharacterCardUpdateResult {
   updates: CharacterCardFieldUpdate[];
+}
+
+// ──────────────────────────────────────────────
+// Thread Weaver Types
+// ──────────────────────────────────────────────
+
+export type ThreadCategory =
+  | "adversary"
+  | "social"
+  | "mystery"
+  | "opportunity"
+  | "environment"
+  | "internal";
+
+export type FuseType = "immediate" | "short" | "long";
+
+export type ThreadStatus = "planted" | "firing" | "fired" | "invalidated";
+
+export type SeedSource = "scene" | "player_action" | "card_lore" | "off_screen";
+
+export interface ThreadEvolutionEntry {
+  fromPremise: string;
+  fromPayoffHint: string;
+  fromFuseType: FuseType;
+  atTurn: number;
+  reason: string;
+}
+
+export interface PlotThread {
+  id: string;
+  category: ThreadCategory;
+  premise: string;
+  payoffHint: string;
+  fuseType: FuseType;
+  fuseTurns: number;
+  plantedAtTurn: number;
+  status: ThreadStatus;
+  seedSource: SeedSource;
+  evolutionCount: number;
+  /** Capped at last 5 entries; oldest dropped on overflow. */
+  evolutionHistory: ThreadEvolutionEntry[];
+  resolutionMode?: "on_scene" | "off_scene";
+  finalizedDirection?: string;
+  reason?: string;
+  firedAtTurn?: number;
+  invalidatedAtTurn?: number;
+}
+
+export interface PendingFiring {
+  threadId: string;
+  mode: "on_scene" | "off_scene";
+  finalizedDirection: string;
+  decidedAtTurn: number;
+}
+
+export interface PendingForceFire {
+  threadId: string;
+  mode: "on_scene" | "off_scene";
+}
+
+/**
+ * Full agent memory snapshot for Thread Weaver.
+ * Stored across multiple keys in agentMemory; this type assembles them.
+ */
+export interface ThreadWeaverState {
+  activeThreads: PlotThread[];
+  recentlyFired: PlotThread[];
+  invalidatedThreads: PlotThread[];
+  pendingFiring: PendingFiring[];
+  pendingForceFires: PendingForceFire[];
+  turnCounter: number;
+}
+
+/** Default settings for Thread Weaver — applied via getDefaultBuiltInAgentSettings. */
+export const THREAD_WEAVER_DEFAULT_SETTINGS = {
+  maxActiveThreads: 5,
+  firingsPerTurnCap: 2,
+  recentlyFiredWindowTurns: 30,
+  invalidatedWindowTurns: 30,
+  fuseTurnsImmediate: 1,
+  fuseTurnsShort: 3,
+  fuseTurnsLong: 10,
+} as const;
+
+/** Convert a fuseType to its turn count using current agent settings (or defaults). */
+export function fuseTypeToTurns(fuseType: FuseType, settings: Record<string, unknown> = {}): number {
+  switch (fuseType) {
+    case "immediate":
+      return Number(settings.fuseTurnsImmediate ?? THREAD_WEAVER_DEFAULT_SETTINGS.fuseTurnsImmediate);
+    case "short":
+      return Number(settings.fuseTurnsShort ?? THREAD_WEAVER_DEFAULT_SETTINGS.fuseTurnsShort);
+    case "long":
+      return Number(settings.fuseTurnsLong ?? THREAD_WEAVER_DEFAULT_SETTINGS.fuseTurnsLong);
+  }
 }
 
 // ──────────────────────────────────────────────
