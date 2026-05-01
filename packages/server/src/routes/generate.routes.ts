@@ -129,6 +129,12 @@ import {
 import { getMoraleTier, formatMoraleContext } from "../services/game/morale.service.js";
 import type { GameMap, GameNpc, LorebookEntry } from "@marinara-engine/shared";
 import { sidecarModelService } from "../services/sidecar/sidecar-model.service.js";
+import {
+  preparePrePass,
+  readState,
+  serializeAgentContext,
+  toMemoryEntries,
+} from "../services/agents/thread-weaver.js";
 
 function hasConversationSchedules(value: unknown): value is Record<string, any> {
   return !!value && typeof value === "object" && Object.keys(value as Record<string, unknown>).length > 0;
@@ -3488,6 +3494,31 @@ export async function generateRoutes(app: FastifyInstance) {
           }
         } catch {
           /* non-critical */
+        }
+      }
+
+      // Thread Weaver — run deterministic pre-pass and serialize context for the agent.
+      const threadWeaverAgent = resolvedAgents.find((a) => a.type === "thread-weaver");
+      if (threadWeaverAgent) {
+        try {
+          const settings = parseExtra(threadWeaverAgent.settings);
+          const rawMem = await agentsStore.getMemory(threadWeaverAgent.id, input.chatId);
+          const initial = readState(rawMem);
+          const afterPrePass = preparePrePass(initial);
+          // Persist pre-pass mutations immediately so swipe/regen sees the right state.
+          await agentsStore.setMemoryBatch(
+            threadWeaverAgent.id,
+            input.chatId,
+            toMemoryEntries(afterPrePass),
+          );
+          // Serialize for the agent's prompt context.
+          agentContext.memory._threadWeaverContext = serializeAgentContext(afterPrePass);
+          // Also stash the post-pre-pass state for the post-pass step (avoids a re-read).
+          agentContext.memory._threadWeaverState = afterPrePass;
+          agentContext.memory._threadWeaverSettings = settings;
+        } catch (err) {
+          logger.error(err, "[thread-weaver] Pre-pass failed");
+          // Do not block generation; agent will run without state context.
         }
       }
 
