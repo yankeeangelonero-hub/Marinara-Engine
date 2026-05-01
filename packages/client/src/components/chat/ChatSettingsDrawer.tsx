@@ -102,6 +102,7 @@ import type { Chat, CharacterGroup } from "@marinara-engine/shared";
 import { useCustomTools, type CustomToolRow } from "../../hooks/use-custom-tools";
 import { useHapticStatus, useHapticConnect, useHapticDisconnect, useHapticStartScan } from "../../hooks/use-haptic";
 import { normalizeSpritePlacements } from "./sprite-placement";
+import { ThreadWeaverPanel } from "../agents/ThreadWeaverPanel";
 
 interface ChatSettingsDrawerProps {
   chat: Chat;
@@ -325,6 +326,10 @@ export function ChatSettingsDrawer({
   const expressionEnabledByDefault = isEnabledFlag(expressionConfig?.enabled);
   const expressionActive =
     activeAgentIds.includes("expression") || (activeAgentIds.length === 0 && expressionEnabledByDefault);
+  const threadWeaverConfig = agentConfigsByType.get("thread-weaver") ?? null;
+  const threadWeaverEnabledByDefault = isEnabledFlag(threadWeaverConfig?.enabled);
+  const threadWeaverActive =
+    activeAgentIds.includes("thread-weaver") || (activeAgentIds.length === 0 && threadWeaverEnabledByDefault);
   const lorebookKeeperTargetLorebookId =
     typeof metadata.lorebookKeeperTargetLorebookId === "string" ? metadata.lorebookKeeperTargetLorebookId : "";
   const lorebookKeeperReadBehindMessages = normalizeNonNegativeInteger(
@@ -2964,6 +2969,12 @@ export function ChatSettingsDrawer({
                         </p>
                       </div>
                     )}
+                  </div>
+                )}
+
+                {threadWeaverActive && metadata.enableAgents && !isGame && (
+                  <div className="space-y-2 rounded-xl border border-[var(--border)] bg-[var(--secondary)]/70 p-3">
+                    <ThreadWeaverPanel chatId={chat.id} />
                   </div>
                 )}
 
