@@ -5,6 +5,11 @@ import { z } from "zod";
 
 export const agentPhaseSchema = z.enum(["pre_generation", "parallel", "post_processing"]);
 
+// NOTE: this enum is intentionally a subset of the AgentResultType union — entries
+// like `custom_tracker_update`, `haptic_command`, `cyoa_choices`, and the game-mode
+// result types are not yet mirrored here. If you add a new entry, also confirm
+// whether it needs to be present in the union in `types/agent.ts`. Tracking the
+// drift is out of scope for the Thread Weaver work; see project tech-debt.
 export const agentResultTypeSchema = z.enum([
   "game_state_update",
   "text_rewrite",

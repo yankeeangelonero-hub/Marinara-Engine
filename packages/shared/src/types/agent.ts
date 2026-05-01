@@ -698,13 +698,17 @@ export const THREAD_WEAVER_DEFAULT_SETTINGS = {
 
 /** Convert a fuseType to its turn count using current agent settings (or defaults). */
 export function fuseTypeToTurns(fuseType: FuseType, settings: Record<string, unknown> = {}): number {
+  const pick = (key: keyof typeof THREAD_WEAVER_DEFAULT_SETTINGS, fallback: number): number => {
+    const candidate = Number(settings[key]);
+    return Number.isFinite(candidate) && candidate > 0 ? candidate : fallback;
+  };
   switch (fuseType) {
     case "immediate":
-      return Number(settings.fuseTurnsImmediate ?? THREAD_WEAVER_DEFAULT_SETTINGS.fuseTurnsImmediate);
+      return pick("fuseTurnsImmediate", THREAD_WEAVER_DEFAULT_SETTINGS.fuseTurnsImmediate);
     case "short":
-      return Number(settings.fuseTurnsShort ?? THREAD_WEAVER_DEFAULT_SETTINGS.fuseTurnsShort);
+      return pick("fuseTurnsShort", THREAD_WEAVER_DEFAULT_SETTINGS.fuseTurnsShort);
     case "long":
-      return Number(settings.fuseTurnsLong ?? THREAD_WEAVER_DEFAULT_SETTINGS.fuseTurnsLong);
+      return pick("fuseTurnsLong", THREAD_WEAVER_DEFAULT_SETTINGS.fuseTurnsLong);
   }
 }
 
