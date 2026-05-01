@@ -2,7 +2,7 @@
 // Zustand Store: Agent Slice
 // ──────────────────────────────────────────────
 import { create } from "zustand";
-import type { AgentResult, CharacterCardFieldUpdate } from "@marinara-engine/shared";
+import type { AgentResult, CharacterCardFieldUpdate, ThreadWeaverState } from "@marinara-engine/shared";
 
 /**
  * A character_card_update result awaiting user confirmation.
@@ -50,6 +50,8 @@ interface AgentState {
     text: string;
   }>;
   pendingCardUpdates: PendingCardUpdate[];
+  threadWeaverState: ThreadWeaverState | null;
+  threadWeaverChatId: string | null;
 
   // Actions
   setActiveAgents: (agents: string[]) => void;
@@ -68,6 +70,8 @@ interface AgentState {
   setEchoLoadedChatId: (chatId: string | null) => void;
   setCyoaChoices: (choices: Array<{ label: string; text: string }>) => void;
   clearCyoaChoices: () => void;
+  setThreadWeaverState: (chatId: string, state: ThreadWeaverState) => void;
+  clearThreadWeaverState: () => void;
   enqueuePendingCardUpdate: (entry: PendingCardUpdate) => void;
   dismissPendingCardUpdate: (id: string) => void;
   clearPendingCardUpdates: () => void;
@@ -86,6 +90,8 @@ export const useAgentStore = create<AgentState>((set) => ({
   echoLoadedChatId: null,
   cyoaChoices: [],
   pendingCardUpdates: [],
+  threadWeaverState: null,
+  threadWeaverChatId: null,
 
   setActiveAgents: (agents) => set({ activeAgents: agents }),
   setProcessing: (processing) => set({ isProcessing: processing }),
@@ -139,6 +145,9 @@ export const useAgentStore = create<AgentState>((set) => ({
     set((s) => ({ pendingCardUpdates: s.pendingCardUpdates.filter((e) => e.id !== id) })),
   clearPendingCardUpdates: () => set({ pendingCardUpdates: [] }),
 
+  setThreadWeaverState: (chatId, state) => set({ threadWeaverState: state, threadWeaverChatId: chatId }),
+  clearThreadWeaverState: () => set({ threadWeaverState: null, threadWeaverChatId: null }),
+
   reset: () =>
     set({
       activeAgents: [],
@@ -152,5 +161,7 @@ export const useAgentStore = create<AgentState>((set) => ({
       echoLoadedChatId: null,
       cyoaChoices: [],
       pendingCardUpdates: [],
+      threadWeaverState: null,
+      threadWeaverChatId: null,
     }),
 }));
