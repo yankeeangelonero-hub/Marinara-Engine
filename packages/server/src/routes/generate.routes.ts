@@ -130,10 +130,15 @@ import { getMoraleTier, formatMoraleContext } from "../services/game/morale.serv
 import type { GameMap, GameNpc, LorebookEntry } from "@marinara-engine/shared";
 import { sidecarModelService } from "../services/sidecar/sidecar-model.service.js";
 import {
+  ageOutWindows,
+  applyDecisions,
+  buildMainPromptBlocks,
   preparePrePass,
   readState,
   serializeAgentContext,
   toMemoryEntries,
+  type FiringDecision,
+  type NewThreadInput,
 } from "../services/agents/thread-weaver.js";
 
 function hasConversationSchedules(value: unknown): value is Record<string, any> {
@@ -4170,6 +4175,12 @@ export async function generateRoutes(app: FastifyInstance) {
         }
       };
 
+      // Thread Weaver injection blocks — declared at this scope so they are reachable
+      // both from the post-pass block below (inside the shouldRunPreGen branch) and
+      // from the Task 9 prompt-injection step (outside that branch, alongside secretPlotAgent).
+      let twSceneDirective: string | undefined;
+      let twMeanwhileCutaway: string | undefined;
+
       if (shouldRunPreGen || shouldRunKR || shouldRunRouter) {
         sendProgress("agents");
 
@@ -4360,6 +4371,48 @@ export async function generateRoutes(app: FastifyInstance) {
             );
           } catch (persistErr) {
             logger.error(persistErr, "[secret-plot-driver] Failed to persist state");
+          }
+        }
+
+        // ── Thread Weaver: parse result, apply decisions, persist, build injection ──
+        const twResult = preGenResults.find((r) => r.type === "thread_weaver_update");
+        if (threadWeaverAgent) {
+          const settings = (agentContext.memory._threadWeaverSettings as Record<string, unknown>) ?? {};
+          let stateAfterAgent =
+            (agentContext.memory._threadWeaverState as ReturnType<typeof readState>) ??
+            readState(await agentsStore.getMemory(threadWeaverAgent.id, input.chatId));
+
+          if (twResult?.success && twResult.data && typeof twResult.data === "object") {
+            const data = twResult.data as {
+              newThreads?: NewThreadInput[];
+              firingDecisions?: FiringDecision[];
+            };
+            const decisions = Array.isArray(data.firingDecisions) ? data.firingDecisions : [];
+            const plants = Array.isArray(data.newThreads) ? data.newThreads : [];
+
+            try {
+              const applied = applyDecisions(stateAfterAgent, decisions, plants, settings);
+              stateAfterAgent = ageOutWindows(applied.state, settings);
+
+              const blocks = buildMainPromptBlocks(applied.firingsThisTurn);
+              twSceneDirective = blocks.sceneDirective;
+              twMeanwhileCutaway = blocks.meanwhileCutaway;
+
+              await agentsStore.setMemoryBatch(
+                threadWeaverAgent.id,
+                input.chatId,
+                toMemoryEntries(stateAfterAgent),
+              );
+              logger.debug(
+                `[thread-weaver] Post-pass: ${plants.length} new, ${decisions.length} decisions, ${applied.firingsThisTurn.length} firings injected`,
+              );
+            } catch (twErr) {
+              logger.error(twErr, "[thread-weaver] Post-pass failed");
+            }
+          } else if (twResult && !twResult.success) {
+            // Agent failed — keep firing-status threads queued for next turn.
+            // No new firings this turn. State already persisted in pre-pass.
+            logger.warn(`[thread-weaver] Agent failed; firings deferred. Error: ${twResult.error ?? "unknown"}`);
           }
         }
 
