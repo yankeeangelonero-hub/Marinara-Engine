@@ -4684,6 +4684,24 @@ export async function generateRoutes(app: FastifyInstance) {
       }
 
       // ────────────────────────────────────────
+      // Thread Weaver: inject scene_directive (on-scene firings) and
+      // meanwhile_cutaway (off-scene firings) immediately before the last user message.
+      // ────────────────────────────────────────
+      if (twSceneDirective || twMeanwhileCutaway) {
+        const lastUserIdx = findLastIndex(finalMessages, "user");
+        const insertAt = lastUserIdx >= 0 ? lastUserIdx : finalMessages.length;
+        const blocks: Array<{ role: "system"; content: string }> = [];
+        if (twMeanwhileCutaway) {
+          // Cutaway first — it instructs the model to OPEN with the meanwhile.
+          blocks.push({ role: "system", content: twMeanwhileCutaway });
+        }
+        if (twSceneDirective) {
+          blocks.push({ role: "system", content: twSceneDirective });
+        }
+        finalMessages.splice(insertAt, 0, ...blocks);
+      }
+
+      // ────────────────────────────────────────
       // Static injection: Immersive HTML agent
       // ────────────────────────────────────────
       if (resolvedAgents.some((a) => a.type === "html")) {
