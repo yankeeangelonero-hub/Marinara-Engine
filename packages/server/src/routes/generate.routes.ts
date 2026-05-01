@@ -4431,9 +4431,12 @@ export async function generateRoutes(app: FastifyInstance) {
           );
           if (hasContextInjectionAgents) {
             reply.raw.write(`data: ${JSON.stringify({ type: "agent_start", data: { phase: "pre_generation" } })}\n\n`);
-            // On regens, exclude secret-plot-driver — it only triggers on new user messages
+            // On regens, exclude secret-plot-driver and thread-weaver — they only trigger on new user messages
             contextInjections = await pipeline.preGenerate(
-              (agentType) => !EXCLUDED_FROM_PIPELINE.has(agentType) && agentType !== "secret-plot-driver",
+              (agentType) =>
+                !EXCLUDED_FROM_PIPELINE.has(agentType) &&
+                agentType !== "secret-plot-driver" &&
+                agentType !== "thread-weaver",
             );
 
             // Failure gate — same as the new-message path
@@ -4441,7 +4444,8 @@ export async function generateRoutes(app: FastifyInstance) {
               (r) =>
                 r.agentType !== "knowledge-retrieval" &&
                 r.agentType !== "knowledge-router" &&
-                r.agentType !== "secret-plot-driver",
+                r.agentType !== "secret-plot-driver" &&
+                r.agentType !== "thread-weaver",
             );
             const failedRegen = regenPreGenResults.filter((r) => !r.success);
             if (failedRegen.length > 0) {
