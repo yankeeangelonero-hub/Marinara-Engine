@@ -711,7 +711,7 @@ FUSE TYPES (turn count until firing):
 FOR EACH FIRING THREAD (<firing_now>), decide ONE action:
 - fire_on_scene: Fire in the current beat. Provide finalizedDirection — 1-2 sentences telling the main model how to weave it in. PREFER this when the current scene can naturally accommodate the thread.
 - fire_off_scene: Fire as a brief "meanwhile, elsewhere" cutaway BEFORE the main scene. Provide finalizedDirection — 1-2 sentences describing what happens off-screen. ONLY use when the current beat is genuinely intimate, time-skipped, or unrelated to the thread. Do NOT default to off-scene; it is louder than on-scene because it shoves a B-plot in front of the user's actual moment.
-- evolve: The story has shaped this thread. Provide newFuseType (immediate/short/long); optionally revise newPremise and/or newPayoffHint. Mandatory reason explaining what the story imposed. Evolution must reflect changes the story has IMPOSED on the thread, not be retrofitted to match what is already happening this turn. If the current scene already contains the thread's payoff, fire it instead.
+- evolve: The story has shaped this thread. Provide newFuseType (immediate/short/long); optionally revise newPremise and/or newPayoffHint. Mandatory reason explaining what the story imposed. Evolution must reflect changes the story has IMPOSED on the thread, not be retrofitted to match what is already happening this turn. If the current scene already contains the thread's payoff, fire it instead. Note: evolve only applies to threads listed in <firing_now> — do not emit firingDecisions for threads that are still counting down. Active-but-not-yet-firing threads count down naturally; you cannot mutate them outside their firing turn.
 - invalidate: The thread is no longer narratively valid (the character it concerned has died, the location is unreachable, the player chose a path that closed it off). Mandatory reason citing what made it invalid.
 
 PLANT NEW THREADS when the recent scene establishes seed-worthy material:
@@ -724,14 +724,15 @@ PLANT NEW THREADS when the recent scene establishes seed-worthy material:
 DIVERSITY: aim for variety across categories among the active set. If you already have 3 adversary threads active, prefer a different category — UNLESS the genre/setting genuinely calls for adversary-heavy planting (e.g., a war campaign).
 
 CAPS:
-- 5 active threads max. If the active set is at 5, do NOT plant new threads — focus only on firingDecisions.
+- 5 active threads max. Count the slots that will be free AFTER this turn's firingDecisions resolve (each fire_on_scene, fire_off_scene, and invalidate frees a slot; evolve does not). Plant new threads only up to that post-decision capacity. If the active set will still be at 5 after this turn, do NOT plant new threads — focus only on firingDecisions.
 - 2 firings per turn max. Even if <firing_now> contains more than 2 IDs, decide on all of them; the server will inject only the first 2 and queue the rest for next turn.
 
 RULES OF THUMB:
 - Trust the user's pacing. If recent_messages show a tender or quiet beat, prefer evolve over fire to push the fuse out rather than interrupt the moment.
+- If a thread appears in <firing_now> and you omit it from firingDecisions entirely, the service treats it as deferred — the thread stays in firing status and gets re-evaluated on the next turn. Use this only when you cannot make a confident decision yet. Prefer to issue an explicit evolve when you want to push the fuse out deliberately.
 - Do NOT plant threads about events that already happened — those go in <recently_fired> as callbacks, not as new threads.
 - Do NOT invalidate to avoid work. If you invalidate, the reason must cite specific narrative text.
-- When <firing_now> is empty AND active is at 5 AND nothing is seed-worthy, return: {"newThreads": [], "firingDecisions": []}
+- If there is nothing to fire and nothing seed-worthy to plant this turn, return: {"newThreads": [], "firingDecisions": []}
 
 OUTPUT — strict JSON, no prose outside the object:
 {
