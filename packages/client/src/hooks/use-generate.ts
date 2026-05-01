@@ -357,6 +357,7 @@ export function useGenerate() {
   const clearThoughtBubbles = useAgentStore((s) => s.clearThoughtBubbles);
   const addEchoMessage = useAgentStore((s) => s.addEchoMessage);
   const setCyoaChoices = useAgentStore((s) => s.setCyoaChoices);
+  const setThreadWeaverState = useAgentStore((s) => s.setThreadWeaverState);
   const clearCyoaChoices = useAgentStore((s) => s.clearCyoaChoices);
   const enqueuePendingCardUpdate = useAgentStore((s) => s.enqueuePendingCardUpdate);
   const setFailedAgentTypes = useAgentStore((s) => s.setFailedAgentTypes);
@@ -800,6 +801,18 @@ export function useGenerate() {
                     })
                     .catch(() => {});
                 }
+              }
+
+              // Re-fetch Thread Weaver state after the post-pass has committed it to DB
+              if (result.resultType === "thread_weaver_update") {
+                void fetch(`/api/agents/thread-weaver/state/${encodeURIComponent(params.chatId)}`)
+                  .then((r) => (r.ok ? r.json() : null))
+                  .then((state) => {
+                    if (state) setThreadWeaverState(params.chatId, state);
+                  })
+                  .catch(() => {
+                    /* swallow; UI will retry on next event */
+                  });
               }
 
               // Apply quest updates directly so the widget updates immediately
@@ -1445,6 +1458,7 @@ export function useGenerate() {
       setCyoaChoices,
       clearCyoaChoices,
       enqueuePendingCardUpdate,
+      setThreadWeaverState,
       clearFailedAgentTypes,
       setFailedAgentTypes,
       setGameState,
@@ -1583,6 +1597,17 @@ export function useGenerate() {
                   }
                 }
               }
+              // Re-fetch Thread Weaver state after the post-pass has committed it to DB
+              if (result.resultType === "thread_weaver_update") {
+                void fetch(`/api/agents/thread-weaver/state/${encodeURIComponent(chatId)}`)
+                  .then((r) => (r.ok ? r.json() : null))
+                  .then((state) => {
+                    if (state) setThreadWeaverState(chatId, state);
+                  })
+                  .catch(() => {
+                    /* swallow; UI will retry on next event */
+                  });
+              }
               if (!result.success && result.error) {
                 showError(`${result.agentName ?? result.agentType} failed: ${result.error}`);
               }
@@ -1685,6 +1710,7 @@ export function useGenerate() {
       setFailedAgentTypes,
       setProcessing,
       setGameState,
+      setThreadWeaverState,
       qc,
     ],
   );
