@@ -76,7 +76,7 @@ function formatToolPayloadForLog(payload: string, maxLength = 400): string {
  * Default timeout for agent LLM calls. Configurable per-agent via `agentTimeoutMs` in settings.
  * After this duration, the agent is marked failed and the pipeline continues without it.
  */
-const DEFAULT_AGENT_TIMEOUT_MS = 30_000;
+const DEFAULT_AGENT_TIMEOUT_MS = 60_000;
 
 /**
  * Wrap a promise with a timeout. If the timeout fires first, reject with a typed error
