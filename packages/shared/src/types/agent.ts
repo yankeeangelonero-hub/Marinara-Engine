@@ -688,13 +688,18 @@ export interface ThreadWeaverState {
 /** Default settings for Thread Weaver — applied via getDefaultBuiltInAgentSettings. */
 export const THREAD_WEAVER_DEFAULT_SETTINGS = {
   maxActiveThreads: 5,
-  firingsPerTurnCap: 2,
+  // One firing decision per turn keeps per-call output volume small. Extra firings
+  // stay queued for subsequent turns. Halves fire-turn latency vs cap=2.
+  firingsPerTurnCap: 1,
   recentlyFiredWindowTurns: 30,
   invalidatedWindowTurns: 30,
   fuseTurnsImmediate: 1,
   fuseTurnsShort: 3,
   fuseTurnsLong: 10,
   agentTimeoutMs: 60_000,  // Heavier agent than most — needs more time to reason about firing decisions
+  // Smaller recent-message window than the global default (5). TW only needs current scene
+  // mood to choose on/off-scene, not the entire short-term history.
+  contextSize: 3,
   // Skip the lore (character cards / persona / scenario) block in the agent prompt.
   // Lore primes the model into roleplay mode and prevents strict JSON output.
   // Thread Weaver derives character knowledge from recent_messages and chat_summary instead.

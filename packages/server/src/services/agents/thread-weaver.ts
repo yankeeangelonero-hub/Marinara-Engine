@@ -45,6 +45,7 @@ export function preparePrePass(state: ThreadWeaverState): ThreadWeaverState {
   // 1. Drain previous-turn pending firings into recentlyFired.
   let recentlyFired = state.recentlyFired;
   let activeThreads = state.activeThreads;
+  let invalidatedThreads = state.invalidatedThreads;
   if (state.pendingFiring.length > 0) {
     const pendingIds = new Set(state.pendingFiring.map((p) => p.threadId));
     const drained: PlotThread[] = [];
@@ -66,7 +67,30 @@ export function preparePrePass(state: ThreadWeaverState): ThreadWeaverState {
   // 2. Increment turn counter.
   const turnCounter = state.turnCounter + 1;
 
-  // 3. Decrement fuses + mark `firing`.
+  // 3. Auto-invalidate firing-status threads that have been stuck >3 turns
+  //    without resolution. Prevents the firing queue from accumulating when
+  //    the agent repeatedly fails (timeouts, parse errors, etc.). Without this,
+  //    each stuck thread compounds context bloat on the next turn.
+  const STUCK_THRESHOLD = 3;
+  activeThreads = activeThreads.filter((t) => {
+    if (t.status !== "firing") return true;
+    const stuckTurns = turnCounter - t.plantedAtTurn - fuseTurnsForType(t.fuseType);
+    if (stuckTurns >= STUCK_THRESHOLD) {
+      invalidatedThreads = [
+        ...invalidatedThreads,
+        {
+          ...t,
+          status: "invalidated",
+          invalidatedAtTurn: turnCounter,
+          reason: `auto-invalidated: agent could not resolve firing for ${stuckTurns} turns`,
+        },
+      ];
+      return false;
+    }
+    return true;
+  });
+
+  // 4. Decrement fuses + mark new firings.
   activeThreads = activeThreads.map((t) => {
     if (t.status !== "planted") return t;
     const newFuse = t.fuseTurns - 1;
@@ -81,9 +105,22 @@ export function preparePrePass(state: ThreadWeaverState): ThreadWeaverState {
     ...state,
     activeThreads,
     recentlyFired,
+    invalidatedThreads,
     pendingFiring: [], // drained
     turnCounter,
   };
+}
+
+/** Helper: nominal fuse length for a fuse type, used to compute stuck-turns. */
+function fuseTurnsForType(fuseType: FuseType): number {
+  switch (fuseType) {
+    case "immediate":
+      return THREAD_WEAVER_DEFAULT_SETTINGS.fuseTurnsImmediate;
+    case "short":
+      return THREAD_WEAVER_DEFAULT_SETTINGS.fuseTurnsShort;
+    case "long":
+      return THREAD_WEAVER_DEFAULT_SETTINGS.fuseTurnsLong;
+  }
 }
 
 /** Categories of decisions the agent may emit per firing thread. */
@@ -243,13 +280,17 @@ export function serializeAgentContext(state: ThreadWeaverState): string {
 
   parts.push(`<turn_counter>${state.turnCounter}</turn_counter>`);
 
+  // Show planted (not yet firing) threads in <active_threads>. Firing threads
+  // appear in <firing_now> below with full premise/payoffHint, so listing them
+  // here too would be duplicate context for the agent.
+  const plantedThreads = state.activeThreads.filter((t) => t.status === "planted");
   parts.push(`<active_threads>`);
-  if (state.activeThreads.length === 0) {
+  if (plantedThreads.length === 0) {
     parts.push(`(none)`);
   } else {
-    for (const t of state.activeThreads) {
+    for (const t of plantedThreads) {
       parts.push(
-        `- id=${t.id} category=${t.category} fuseType=${t.fuseType} fuseTurns=${t.fuseTurns} status=${t.status} evolutionCount=${t.evolutionCount}`,
+        `- id=${t.id} category=${t.category} fuseType=${t.fuseType} fuseTurns=${t.fuseTurns} evolutionCount=${t.evolutionCount}`,
       );
       parts.push(`    premise: ${t.premise}`);
       parts.push(`    payoffHint: ${t.payoffHint}`);
@@ -257,19 +298,24 @@ export function serializeAgentContext(state: ThreadWeaverState): string {
   }
   parts.push(`</active_threads>`);
 
-  // Firing IDs include both fuse-zero firings AND user-queued force-fires.
-  const firingIds = new Set([
-    ...state.activeThreads.filter((t) => t.status === "firing").map((t) => t.id),
-    ...state.pendingForceFires.map((f) => f.threadId),
-  ]);
+  // Firing threads — include full premise + payoffHint so the agent has what
+  // it needs to choose a resolution mode and write a finalizedDirection.
+  const firingThreads = state.activeThreads.filter((t) => t.status === "firing");
   parts.push(`<firing_now>`);
-  if (firingIds.size === 0) {
+  if (firingThreads.length === 0 && state.pendingForceFires.length === 0) {
     parts.push(`(none)`);
   } else {
-    for (const id of firingIds) {
-      const forced = state.pendingForceFires.find((f) => f.threadId === id);
+    for (const t of firingThreads) {
+      const forced = state.pendingForceFires.find((f) => f.threadId === t.id);
       const suffix = forced ? ` (user-forced, mode=${forced.mode})` : "";
-      parts.push(`- ${id}${suffix}`);
+      parts.push(`- id=${t.id} category=${t.category}${suffix}`);
+      parts.push(`    premise: ${t.premise}`);
+      parts.push(`    payoffHint: ${t.payoffHint}`);
+    }
+    // Force-fires for threads that aren't in active set (e.g., recently invalidated by another path)
+    for (const f of state.pendingForceFires) {
+      if (firingThreads.some((t) => t.id === f.threadId)) continue;
+      parts.push(`- id=${f.threadId} (user-forced, mode=${f.mode}, thread no longer active)`);
     }
   }
   parts.push(`</firing_now>`);
