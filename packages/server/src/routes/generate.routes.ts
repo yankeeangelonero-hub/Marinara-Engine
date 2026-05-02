@@ -3503,8 +3503,10 @@ export async function generateRoutes(app: FastifyInstance) {
       }
 
       // Thread Weaver — run deterministic pre-pass and serialize context for the agent.
+      // On regen/swipe, do NOT mutate state; just re-load and re-inject any pending directives
+      // (preserves the firing the user triggered last turn).
       const threadWeaverAgent = resolvedAgents.find((a) => a.type === "thread-weaver");
-      if (threadWeaverAgent) {
+      if (threadWeaverAgent && !input.regenerateMessageId) {
         try {
           const settings = parseExtra(threadWeaverAgent.settings);
           const rawMem = await agentsStore.getMemory(threadWeaverAgent.id, input.chatId);
@@ -3524,6 +3526,17 @@ export async function generateRoutes(app: FastifyInstance) {
         } catch (err) {
           logger.error(err, "[thread-weaver] Pre-pass failed");
           // Do not block generation; agent will run without state context.
+        }
+      } else if (threadWeaverAgent && input.regenerateMessageId) {
+        // Regen path: rebuild directives from already-persisted pendingFiring without mutating state.
+        try {
+          const rawMem = await agentsStore.getMemory(threadWeaverAgent.id, input.chatId);
+          const state = readState(rawMem);
+          const blocks = buildMainPromptBlocks(state.pendingFiring);
+          agentContext.memory._threadWeaverRegenSceneDirective = blocks.sceneDirective;
+          agentContext.memory._threadWeaverRegenMeanwhileCutaway = blocks.meanwhileCutaway;
+        } catch (err) {
+          logger.error(err, "[thread-weaver] Regen re-inject failed");
         }
       }
 
@@ -4180,6 +4193,12 @@ export async function generateRoutes(app: FastifyInstance) {
       // from the Task 9 prompt-injection step (outside that branch, alongside secretPlotAgent).
       let twSceneDirective: string | undefined;
       let twMeanwhileCutaway: string | undefined;
+      // On regen, the post-pass block is skipped (TW excluded from pipeline.preGenerate),
+      // so seed the directives from the regen-time rebuild stashed during pre-pass.
+      if (input.regenerateMessageId) {
+        twSceneDirective = agentContext.memory._threadWeaverRegenSceneDirective as string | undefined;
+        twMeanwhileCutaway = agentContext.memory._threadWeaverRegenMeanwhileCutaway as string | undefined;
+      }
 
       if (shouldRunPreGen || shouldRunKR || shouldRunRouter) {
         sendProgress("agents");
