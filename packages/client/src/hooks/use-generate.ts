@@ -868,6 +868,14 @@ export function useGenerate() {
               break;
             }
 
+            case "thread_weaver_state": {
+              // Post-applied state bundled by the server after setMemoryBatch — no refetch needed.
+              if (!isActiveChat()) break;
+              const tw = event.data as { chatId: string; state: unknown };
+              if (tw?.state) setThreadWeaverState(params.chatId, tw.state as any);
+              break;
+            }
+
             case "thinking": {
               // Thinking chunks are streamed from the server but persisted in message extra
               // — the UI picks them up after query invalidation on "done". Nothing to buffer here.
@@ -1611,6 +1619,13 @@ export function useGenerate() {
               if (!result.success && result.error) {
                 showError(`${result.agentName ?? result.agentType} failed: ${result.error}`);
               }
+              break;
+            }
+            case "thread_weaver_state": {
+              // Post-applied state bundled by the server after setMemoryBatch — no refetch needed.
+              if (!isActiveChat()) break;
+              const tw = event.data as { chatId: string; state: unknown };
+              if (tw?.state) setThreadWeaverState(chatId, tw.state as any);
               break;
             }
             case "agents_retry_failed": {

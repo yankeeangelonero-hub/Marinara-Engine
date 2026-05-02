@@ -4422,6 +4422,11 @@ export async function generateRoutes(app: FastifyInstance) {
                 input.chatId,
                 toMemoryEntries(stateAfterAgent),
               );
+              // Bundle post-applied state for the client to skip its refetch (eliminates race vs setMemoryBatch).
+              trySendSseEvent(reply, {
+                type: "thread_weaver_state",
+                data: { chatId: input.chatId, state: stateAfterAgent },
+              });
               logger.debug(
                 `[thread-weaver] Post-pass: ${plants.length} new, ${decisions.length} decisions, ${applied.firingsThisTurn.length} firings injected`,
               );
