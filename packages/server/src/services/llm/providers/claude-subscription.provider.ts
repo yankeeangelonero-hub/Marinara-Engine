@@ -20,6 +20,8 @@
 //     same mechanism Zed and other IDE integrations use.
 //   • SDK docs: https://docs.anthropic.com/en/docs/claude-code/sdk
 //
+import { tmpdir } from "node:os";
+
 import { BaseLLMProvider, type ChatMessage, type ChatOptions, type LLMUsage } from "../base-provider.js";
 import { logger } from "../../../lib/logger.js";
 
@@ -128,6 +130,12 @@ export class ClaudeSubscriptionProvider extends BaseLLMProvider {
       // response.
       tools: [],
       permissionMode: "bypassPermissions",
+      // Pin the spawned Claude Code session to a project-less directory.
+      // Otherwise it inherits the server's cwd; if that cwd is itself a
+      // Claude Code project (e.g. running `pnpm dev` from the Marinara
+      // source tree while another Claude Code session is active there),
+      // the SDK call collides with the parent session.
+      cwd: tmpdir(),
     };
 
     if (options.enableThinking) {
