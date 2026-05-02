@@ -432,6 +432,9 @@ async function executeAgentWithTools(
 // Batched Execution — Multiple agents in one LLM call
 // ──────────────────────────────────────────────
 
+// Thread Weaver requires its own per-agent timeout and skipLoreBlock; never batch.
+const NEVER_BATCH_AGENT_TYPES: ReadonlySet<string> = new Set(["thread-weaver"]);
+
 /**
  * Execute multiple agents in a single LLM call.
  * Combines all agent prompts into one request using XML-delimited sections,
@@ -450,6 +453,12 @@ export async function executeAgentBatch(
   if (configs.length === 1) {
     logger.info(`[agent-batch] Only 1 agent (${configs[0]!.type}), running individually`);
     return [await executeAgent(configs[0]!, context, provider, model)];
+  }
+
+  // Never-batch agents must run standalone — run all configs individually if any match.
+  if (configs.some((c) => NEVER_BATCH_AGENT_TYPES.has(c.type))) {
+    logger.info(`[agent-batch] Batch contains never-batch agent(s) — running all ${configs.length} individually`);
+    return Promise.all(configs.map((c) => executeAgent(c, context, provider, model)));
   }
 
   logger.info(`[agent-batch] Batching ${configs.length} agents: [${configs.map((c) => c.type).join(", ")}]`);
