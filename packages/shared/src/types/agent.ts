@@ -695,6 +695,10 @@ export const THREAD_WEAVER_DEFAULT_SETTINGS = {
   fuseTurnsShort: 3,
   fuseTurnsLong: 10,
   agentTimeoutMs: 60_000,  // Heavier agent than most — needs more time to reason about firing decisions
+  // Skip the lore (character cards / persona / scenario) block in the agent prompt.
+  // Lore primes the model into roleplay mode and prevents strict JSON output.
+  // Thread Weaver derives character knowledge from recent_messages and chat_summary instead.
+  skipLoreBlock: true,
 } as const;
 
 /** Convert a fuseType to its turn count using current agent settings (or defaults). */

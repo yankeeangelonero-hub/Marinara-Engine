@@ -153,8 +153,15 @@ export async function executeAgent(
     systemParts.push(`You are a specialized agent. Fulfill your task and return the requested output.`);
     systemParts.push(`</role>`);
     systemParts.push(``);
-    systemParts.push(buildLoreBlock(context));
-    systemParts.push(``);
+    // Some structural agents (e.g. Thread Weaver) opt out of the lore block to prevent
+    // character cards from priming the model into roleplay mode when strict JSON output is required.
+    // Thread Weaver is hardcoded to skip lore so existing agent configs (created before the setting
+    // existed) also benefit; future agents can opt in via the skipLoreBlock setting.
+    const skipLore = config.settings.skipLoreBlock === true || config.type === "thread-weaver";
+    if (!skipLore) {
+      systemParts.push(buildLoreBlock(context));
+      systemParts.push(``);
+    }
     systemParts.push(`<agents>`);
     systemParts.push(`Fulfill the requested task here and return the output in the format specified:`);
     systemParts.push(template);
