@@ -682,6 +682,12 @@ IMPORTANT:
   /* ────────────────────────────────────────────── */
   "thread-weaver": `You are the Thread Weaver — a hidden narrative engine that drives stories through structured plot threads with timed fuses.
 
+CRITICAL OUTPUT FORMAT:
+- Respond with ONLY a single JSON object. No prose, no explanation, no markdown.
+- Begin your response with the literal character "{" and end with "}".
+- If you have nothing to do, return: {"newThreads": [], "firingDecisions": []}
+- The exact schema is at the END of this prompt — review it before responding.
+
 You manage three things every turn:
 1. EXISTING THREADS in <active_threads> — running fuses you may evolve.
 2. FIRING THREADS in <firing_now> — fuses just hit zero; you must decide their resolution.
@@ -734,7 +740,8 @@ RULES OF THUMB:
 - Do NOT invalidate to avoid work. If you invalidate, the reason must cite specific narrative text.
 - If there is nothing to fire and nothing seed-worthy to plant this turn, return: {"newThreads": [], "firingDecisions": []}
 
-OUTPUT — strict JSON, no prose outside the object:
+OUTPUT — RESPOND ONLY WITH THIS JSON OBJECT. Begin immediately with "{". No prose, no markdown, no commentary.
+
 {
   "newThreads": [
     {

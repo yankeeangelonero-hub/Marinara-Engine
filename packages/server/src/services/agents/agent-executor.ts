@@ -106,6 +106,21 @@ function withAgentTimeout<T>(
   });
 }
 
+/**
+ * Compose the agent's owned AbortController signal with the caller's external
+ * cancellation signal (if any). The provider receives a single signal that fires
+ * when EITHER the timeout fires or the user cancels.
+ *
+ * Uses AbortSignal.any (Node 20+, available per package.json engines).
+ */
+function composeAgentSignal(owned: AbortSignal, external: unknown): AbortSignal {
+  if (external && typeof external === "object" && "aborted" in external) {
+    // External is an AbortSignal — compose.
+    return AbortSignal.any([owned, external as AbortSignal]);
+  }
+  return owned;
+}
+
 /** Resolve the per-agent timeout from settings, falling back to the default. */
 function resolveAgentTimeoutMs(settings: Record<string, unknown>): number {
   const raw = settings.agentTimeoutMs;
@@ -197,7 +212,7 @@ export async function executeAgent(
             responseText += chunk;
           }
         : undefined,
-      signal: abortController.signal,
+      signal: composeAgentSignal(abortController.signal, context.signal),
     });
     let result;
     try {
@@ -273,7 +288,7 @@ async function executeAgentWithTools(
       maxTokens,
       stream: streamResponses,
       tools: toolContext.tools,
-      signal: roundAbort.signal,
+      signal: composeAgentSignal(roundAbort.signal, signal),
     });
     let result;
     try {
@@ -352,7 +367,7 @@ async function executeAgentWithTools(
     temperature,
     maxTokens,
     stream: streamResponses,
-    signal: finalAbort.signal,
+    signal: composeAgentSignal(finalAbort.signal, signal),
   });
   let finalResult;
   try {
@@ -459,7 +474,7 @@ export async function executeAgentBatch(
             responseText += chunk;
           }
         : undefined,
-      signal: batchAbort.signal,
+      signal: composeAgentSignal(batchAbort.signal, context.signal),
     });
     let result;
     try {
