@@ -274,11 +274,13 @@ export function serializeAgentContext(state: ThreadWeaverState): string {
   }
   parts.push(`</firing_now>`);
 
+  // Show only the 10 most recent fired threads to the agent, even though
+  // memory may hold up to 30 turns. Reduces prompt bloat when chats run long.
   parts.push(`<recently_fired>`);
   if (state.recentlyFired.length === 0) {
     parts.push(`(none)`);
   } else {
-    for (const t of state.recentlyFired) {
+    for (const t of state.recentlyFired.slice(-10)) {
       parts.push(
         `- id=${t.id} category=${t.category} firedAtTurn=${t.firedAtTurn ?? "?"} mode=${t.resolutionMode ?? "?"}`,
       );
@@ -287,11 +289,12 @@ export function serializeAgentContext(state: ThreadWeaverState): string {
   }
   parts.push(`</recently_fired>`);
 
+  // Same cap as recently_fired — limit prompt bloat.
   parts.push(`<invalidated_threads>`);
   if (state.invalidatedThreads.length === 0) {
     parts.push(`(none)`);
   } else {
-    for (const t of state.invalidatedThreads) {
+    for (const t of state.invalidatedThreads.slice(-10)) {
       parts.push(`- id=${t.id} category=${t.category} invalidatedAtTurn=${t.invalidatedAtTurn ?? "?"}`);
       parts.push(`    premise: ${t.premise}`);
       parts.push(`    reason: ${t.reason ?? "(none)"}`);

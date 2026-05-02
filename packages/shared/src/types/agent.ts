@@ -694,7 +694,7 @@ export const THREAD_WEAVER_DEFAULT_SETTINGS = {
   fuseTurnsImmediate: 1,
   fuseTurnsShort: 3,
   fuseTurnsLong: 10,
-  agentTimeoutMs: 30_000, // 30s — Thread Weaver has a long prompt; allow extra time
+  agentTimeoutMs: 60_000,  // Heavier agent than most — needs more time to reason about firing decisions
 } as const;
 
 /** Convert a fuseType to its turn count using current agent settings (or defaults). */
