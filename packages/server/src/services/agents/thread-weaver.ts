@@ -74,7 +74,7 @@ export function preparePrePass(state: ThreadWeaverState): ThreadWeaverState {
   const STUCK_THRESHOLD = 3;
   activeThreads = activeThreads.filter((t) => {
     if (t.status !== "firing") return true;
-    const stuckTurns = turnCounter - t.plantedAtTurn - fuseTurnsForType(t.fuseType);
+    const stuckTurns = turnCounter - (t.plantedAtTurn + t.fuseTurns);
     if (stuckTurns >= STUCK_THRESHOLD) {
       invalidatedThreads = [
         ...invalidatedThreads,
@@ -109,18 +109,6 @@ export function preparePrePass(state: ThreadWeaverState): ThreadWeaverState {
     pendingFiring: [], // drained
     turnCounter,
   };
-}
-
-/** Helper: nominal fuse length for a fuse type, used to compute stuck-turns. */
-function fuseTurnsForType(fuseType: FuseType): number {
-  switch (fuseType) {
-    case "immediate":
-      return THREAD_WEAVER_DEFAULT_SETTINGS.fuseTurnsImmediate;
-    case "short":
-      return THREAD_WEAVER_DEFAULT_SETTINGS.fuseTurnsShort;
-    case "long":
-      return THREAD_WEAVER_DEFAULT_SETTINGS.fuseTurnsLong;
-  }
 }
 
 /** Categories of decisions the agent may emit per firing thread. */
@@ -213,6 +201,8 @@ export function applyDecisions(
         payoffHint: decision.newPayoffHint ?? thread.payoffHint,
         fuseType: decision.newFuseType,
         fuseTurns,
+        // Reset plant-time so stuck-firing math restarts; evolutionHistory preserves audit trail
+        plantedAtTurn: turnCounter,
         status: "planted",
         evolutionCount: thread.evolutionCount + 1,
         evolutionHistory: newHistory,
@@ -222,8 +212,14 @@ export function applyDecisions(
   }
 
   // Plant new threads (subject to maxActive cap).
+  // Exclude threads that fired or were invalidated this turn — they vacate the
+  // active set before the next turn, so they shouldn't count against the cap.
+  const firingIds = new Set(firingsThisTurn.map((f) => f.threadId));
+  const effectiveActiveCount = () =>
+    activeThreads.filter((t) => !firingIds.has(t.id)).length;
+
   for (const nt of newThreads) {
-    if (activeThreads.length >= maxActive) break;
+    if (effectiveActiveCount() >= maxActive) break;
     const fuseTurns = fuseTypeToTurns(nt.fuseType, settings);
     const planted: PlotThread = {
       id: newThreadId(),
@@ -241,13 +237,24 @@ export function applyDecisions(
     activeThreads = [...activeThreads, planted];
   }
 
+  // Only drain pendingForceFires that actually fired or are no longer addressable.
+  const firedThreadIds = new Set(firingsThisTurn.map((f) => f.threadId));
+  const allKnownIds = new Set([
+    ...activeThreads.map((t) => t.id),
+    ...invalidatedThreads.map((t) => t.id),
+    ...state.recentlyFired.map((t) => t.id),
+  ]);
+  const remainingForceFires = state.pendingForceFires.filter(
+    (pf) => !firedThreadIds.has(pf.threadId) && allKnownIds.has(pf.threadId),
+  );
+
   return {
     state: {
       ...state,
       activeThreads,
       invalidatedThreads,
       pendingFiring: firingsThisTurn,
-      pendingForceFires: [], // drained — agent saw them in <firing_now>
+      pendingForceFires: remainingForceFires,
     },
     firingsThisTurn,
   };
@@ -264,9 +271,9 @@ export function ageOutWindows(state: ThreadWeaverState, settings: Record<string,
   const now = state.turnCounter;
   return {
     ...state,
-    recentlyFired: state.recentlyFired.filter((t) => now - (t.firedAtTurn ?? 0) <= firedWindow),
+    recentlyFired: state.recentlyFired.filter((t) => now - (t.firedAtTurn ?? 0) < firedWindow),
     invalidatedThreads: state.invalidatedThreads.filter(
-      (t) => now - (t.invalidatedAtTurn ?? 0) <= invalidatedWindow,
+      (t) => now - (t.invalidatedAtTurn ?? 0) < invalidatedWindow,
     ),
   };
 }
@@ -312,10 +319,24 @@ export function serializeAgentContext(state: ThreadWeaverState): string {
       parts.push(`    premise: ${t.premise}`);
       parts.push(`    payoffHint: ${t.payoffHint}`);
     }
-    // Force-fires for threads that aren't in active set (e.g., recently invalidated by another path)
+    // Force-fires whose threads are NOT already listed in <firing_now> (planted but not yet at fuse=0,
+    // or in another part of the active set). Look up the thread for full context.
     for (const f of state.pendingForceFires) {
       if (firingThreads.some((t) => t.id === f.threadId)) continue;
-      parts.push(`- id=${f.threadId} (user-forced, mode=${f.mode}, thread no longer active)`);
+      const thread =
+        state.activeThreads.find((t) => t.id === f.threadId) ??
+        state.invalidatedThreads.find((t) => t.id === f.threadId) ??
+        state.recentlyFired.find((t) => t.id === f.threadId);
+      if (thread) {
+        parts.push(
+          `- id=${f.threadId} (user-forced fire on planted thread, mode=${f.mode}; full context follows)`,
+        );
+        parts.push(`    category: ${thread.category}`);
+        parts.push(`    premise: ${thread.premise}`);
+        parts.push(`    payoffHint: ${thread.payoffHint}`);
+      } else {
+        parts.push(`- id=${f.threadId} (user-forced, mode=${f.mode}, thread no longer in active set — id only)`);
+      }
     }
   }
   parts.push(`</firing_now>`);
@@ -353,20 +374,23 @@ export function serializeAgentContext(state: ThreadWeaverState): string {
 
 /** Build the per-turn injection blocks that go into the MAIN model's prompt. */
 export function buildMainPromptBlocks(firings: PendingFiring[]): { sceneDirective?: string; meanwhileCutaway?: string } {
+  const escapeXml = (s: string): string =>
+    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
   const onScene = firings.filter((f) => f.mode === "on_scene");
   const offScene = firings.filter((f) => f.mode === "off_scene");
 
   const out: { sceneDirective?: string; meanwhileCutaway?: string } = {};
 
   if (onScene.length > 0) {
-    const lines = onScene.map((f) => `- ${f.finalizedDirection}`).join("\n");
+    const lines = onScene.map((f) => `- ${escapeXml(f.finalizedDirection)}`).join("\n");
     out.sceneDirective = `<scene_directive>\nThis turn, weave in the following plot beat(s):\n${lines}\n</scene_directive>`;
   }
 
   if (offScene.length > 0) {
     // We only support one off-scene cutaway per turn (taking the first).
     const f = offScene[0]!;
-    out.meanwhileCutaway = `<meanwhile_cutaway>\nBegin your response with a brief "meanwhile, elsewhere…" cutaway (1-2 paragraphs, italicized) depicting:\n${f.finalizedDirection}\nThen continue with the main scene the user is engaged in.\n</meanwhile_cutaway>`;
+    out.meanwhileCutaway = `<meanwhile_cutaway>\nBegin your response with a brief "meanwhile, elsewhere…" cutaway (1-2 paragraphs, italicized) depicting:\n${escapeXml(f.finalizedDirection)}\nThen continue with the main scene the user is engaged in.\n</meanwhile_cutaway>`;
   }
 
   return out;

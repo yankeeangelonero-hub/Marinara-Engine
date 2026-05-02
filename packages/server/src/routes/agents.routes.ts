@@ -256,6 +256,7 @@ export async function agentsRoutes(app: FastifyInstance) {
       status: "planted",
       fuseType: body.fuseType,
       fuseTurns,
+      plantedAtTurn: ctx.state.turnCounter,
       invalidatedAtTurn: undefined,
       reason: undefined,
     };
