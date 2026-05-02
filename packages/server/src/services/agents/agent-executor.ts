@@ -73,6 +73,47 @@ function formatToolPayloadForLog(payload: string, maxLength = 400): string {
 }
 
 /**
+ * Default timeout for agent LLM calls. Configurable per-agent via `agentTimeoutMs` in settings.
+ * After this duration, the agent is marked failed and the pipeline continues without it.
+ */
+const DEFAULT_AGENT_TIMEOUT_MS = 30_000;
+
+/**
+ * Wrap a promise with a timeout. If the timeout fires first, reject with a typed error
+ * AND abort the supplied AbortController so any in-flight HTTP request can be cancelled.
+ */
+function withAgentTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  abortController: AbortController,
+  agentLabel: string,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      abortController.abort();
+      reject(new Error(`Agent ${agentLabel} timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
+}
+
+/** Resolve the per-agent timeout from settings, falling back to the default. */
+function resolveAgentTimeoutMs(settings: Record<string, unknown>): number {
+  const raw = settings.agentTimeoutMs;
+  const candidate = typeof raw === "number" ? raw : Number(raw);
+  return Number.isFinite(candidate) && candidate > 0 ? candidate : DEFAULT_AGENT_TIMEOUT_MS;
+}
+
+/**
  * Execute a single agent: build prompt → call LLM → parse response.
  * If toolContext is provided, the agent can make tool calls in a loop.
  */
@@ -144,7 +185,9 @@ export async function executeAgent(
     logger.debug(`[agent] ═══ END PROMPT — temperature=${temperature} maxTokens=${maxTokens} ═══\n`);
 
     let responseText = "";
-    const result = await provider.chatComplete(messages, {
+    const timeoutMs = resolveAgentTimeoutMs(config.settings);
+    const abortController = new AbortController();
+    const callPromise = provider.chatComplete(messages, {
       model,
       temperature,
       maxTokens,
@@ -154,8 +197,18 @@ export async function executeAgent(
             responseText += chunk;
           }
         : undefined,
-      signal: context.signal,
+      signal: abortController.signal,
     });
+    let result;
+    try {
+      result = await withAgentTimeout(callPromise, timeoutMs, abortController, config.type);
+    } catch (err) {
+      if (err instanceof Error && err.message.includes("timed out")) {
+        logger.warn(`[agent-executor] ${config.type} timed out (${timeoutMs}ms) — marking failed`);
+        return makeError(config, err.message, startTime);
+      }
+      throw err;
+    }
 
     if (!responseText && result.content) responseText = result.content;
     responseText = responseText.trim();
@@ -210,16 +263,28 @@ async function executeAgentWithTools(
   const loopMessages = [...initialMessages];
   let totalTokens = 0;
   const debugAgentsEnabled = logger.isLevelEnabled("debug");
+  const timeoutMs = resolveAgentTimeoutMs(config.settings);
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-    const result = await provider.chatComplete(loopMessages, {
+    const roundAbort = new AbortController();
+    const roundPromise = provider.chatComplete(loopMessages, {
       model,
       temperature,
       maxTokens,
       stream: streamResponses,
       tools: toolContext.tools,
-      signal,
+      signal: roundAbort.signal,
     });
+    let result;
+    try {
+      result = await withAgentTimeout(roundPromise, timeoutMs, roundAbort, config.type);
+    } catch (err) {
+      if (err instanceof Error && err.message.includes("timed out")) {
+        logger.warn(`[agent-executor] ${config.type} timed out (${timeoutMs}ms) — marking failed`);
+        return makeError(config, err.message, startTime);
+      }
+      throw err;
+    }
 
     totalTokens += result.usage?.totalTokens ?? 0;
 
@@ -281,13 +346,24 @@ async function executeAgentWithTools(
   }
 
   // Exhausted tool rounds — make one final call without tools to get JSON response
-  const finalResult = await provider.chatComplete(loopMessages, {
+  const finalAbort = new AbortController();
+  const finalPromise = provider.chatComplete(loopMessages, {
     model,
     temperature,
     maxTokens,
     stream: streamResponses,
-    signal,
+    signal: finalAbort.signal,
   });
+  let finalResult;
+  try {
+    finalResult = await withAgentTimeout(finalPromise, timeoutMs, finalAbort, config.type);
+  } catch (err) {
+    if (err instanceof Error && err.message.includes("timed out")) {
+      logger.warn(`[agent-executor] ${config.type} timed out (${timeoutMs}ms) — marking failed`);
+      return makeError(config, err.message, startTime);
+    }
+    throw err;
+  }
   totalTokens += finalResult.usage?.totalTokens ?? 0;
   const responseText = finalResult.content?.trim() ?? "";
   const parsed = parseAgentResponse(config.type, responseText);
@@ -369,8 +445,11 @@ export async function executeAgentBatch(
 
     // Use streaming (onToken) to keep the connection alive — avoids proxy
     // timeouts (e.g. Cloudflare 524) on large batch responses.
+    // Use the longest per-agent timeout in the batch (agents share one call).
+    const batchTimeoutMs = Math.max(...configs.map((c) => resolveAgentTimeoutMs(c.settings)));
     let responseText = "";
-    const result = await provider.chatComplete(messages, {
+    const batchAbort = new AbortController();
+    const batchCallPromise = provider.chatComplete(messages, {
       model,
       temperature,
       maxTokens: batchMaxTokens,
@@ -380,8 +459,18 @@ export async function executeAgentBatch(
             responseText += chunk;
           }
         : undefined,
-      signal: context.signal,
+      signal: batchAbort.signal,
     });
+    let result;
+    try {
+      result = await withAgentTimeout(batchCallPromise, batchTimeoutMs, batchAbort, configs.map((c) => c.type).join("+"));
+    } catch (err) {
+      if (err instanceof Error && err.message.includes("timed out")) {
+        logger.warn(`[agent-executor] batch [${configs.map((c) => c.type).join(", ")}] timed out (${batchTimeoutMs}ms) — marking all failed`);
+        return configs.map((c) => makeError(c, err.message, startTime));
+      }
+      throw err;
+    }
 
     // chatComplete also accumulates content, but streaming via onToken is
     // the primary path — use whichever is populated.
