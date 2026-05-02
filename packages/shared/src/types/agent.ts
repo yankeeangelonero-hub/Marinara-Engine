@@ -688,9 +688,8 @@ export interface ThreadWeaverState {
 /** Default settings for Thread Weaver — applied via getDefaultBuiltInAgentSettings. */
 export const THREAD_WEAVER_DEFAULT_SETTINGS = {
   maxActiveThreads: 5,
-  // One firing decision per turn keeps per-call output volume small. Extra firings
-  // stay queued for subsequent turns. Halves fire-turn latency vs cap=2.
-  firingsPerTurnCap: 1,
+  // Allow up to 2 firings per turn; overflow stays queued. Matches user-facing docs.
+  firingsPerTurnCap: 2,
   recentlyFiredWindowTurns: 30,
   invalidatedWindowTurns: 30,
   fuseTurnsImmediate: 1,
