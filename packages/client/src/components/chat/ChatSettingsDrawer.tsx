@@ -330,6 +330,14 @@ export function ChatSettingsDrawer({
   const threadWeaverEnabledByDefault = isEnabledFlag(threadWeaverConfig?.enabled);
   const threadWeaverActive =
     activeAgentIds.includes("thread-weaver") || (activeAgentIds.length === 0 && threadWeaverEnabledByDefault);
+  const threadWeaverMaxActiveThreads = (() => {
+    try {
+      const s = JSON.parse(threadWeaverConfig?.settings ?? "{}") as Record<string, unknown>;
+      return typeof s.maxActiveThreads === "number" ? s.maxActiveThreads : undefined;
+    } catch {
+      return undefined;
+    }
+  })();
   const lorebookKeeperTargetLorebookId =
     typeof metadata.lorebookKeeperTargetLorebookId === "string" ? metadata.lorebookKeeperTargetLorebookId : "";
   const lorebookKeeperReadBehindMessages = normalizeNonNegativeInteger(
@@ -2974,7 +2982,7 @@ export function ChatSettingsDrawer({
 
                 {threadWeaverActive && metadata.enableAgents && !isGame && (
                   <div className="space-y-2 rounded-xl border border-[var(--border)] bg-[var(--secondary)]/70 p-3">
-                    <ThreadWeaverPanel chatId={chat.id} />
+                    <ThreadWeaverPanel chatId={chat.id} maxActiveThreads={threadWeaverMaxActiveThreads} />
                   </div>
                 )}
 

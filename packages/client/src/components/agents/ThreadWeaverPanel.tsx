@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useAgentStore } from "../../stores/agent.store";
+import { THREAD_WEAVER_DEFAULT_SETTINGS } from "@marinara-engine/shared";
 import type {
   FuseType,
   PlotThread,
@@ -9,6 +10,7 @@ import type {
 
 interface Props {
   chatId: string;
+  maxActiveThreads?: number;
 }
 
 const CATEGORY_COLORS: Record<ThreadCategory, string> = {
@@ -26,7 +28,8 @@ const FUSE_LABEL: Record<FuseType, string> = {
   long: "⏳ 10",
 };
 
-export function ThreadWeaverPanel({ chatId }: Props) {
+export function ThreadWeaverPanel({ chatId, maxActiveThreads: maxActiveThreadsProp }: Props) {
+  const maxActiveThreads = maxActiveThreadsProp ?? THREAD_WEAVER_DEFAULT_SETTINGS.maxActiveThreads;
   const state = useAgentStore((s) => s.threadWeaverState);
   const stateChatId = useAgentStore((s) => s.threadWeaverChatId);
   const setThreadWeaverState = useAgentStore((s) => s.setThreadWeaverState);
@@ -97,10 +100,11 @@ export function ThreadWeaverPanel({ chatId }: Props) {
 
       <section>
         <div className="mb-1 flex items-center justify-between">
-          <h4 className="font-medium">Active threads ({state.activeThreads.length}/5)</h4>
+          <h4 className="font-medium">Active threads ({state.activeThreads.length}/{maxActiveThreads})</h4>
           <button
             type="button"
-            className="text-xs underline"
+            className="text-xs underline disabled:opacity-40 disabled:cursor-not-allowed"
+            disabled={!showPlantForm && state.activeThreads.length >= maxActiveThreads}
             onClick={() => setShowPlantForm((v) => !v)}
           >
             {showPlantForm ? "Cancel" : "+ Plant"}
