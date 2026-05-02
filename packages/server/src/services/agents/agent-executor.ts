@@ -239,6 +239,13 @@ export async function executeAgent(
       parsed.data !== null &&
       (parsed.data as { parseError?: boolean }).parseError === true;
 
+    if (parseFailed) {
+      const raw = (parsed.data as { raw?: string }).raw ?? "";
+      logger.warn(
+        `[agent-executor] ${config.type} parse failed — raw response (first 500 chars): ${raw.slice(0, 500).replace(/\n/g, "\n")}`,
+      );
+    }
+
     return {
       agentId: config.id,
       agentType: config.type,
@@ -311,6 +318,12 @@ async function executeAgentWithTools(
         typeof parsed.data === "object" &&
         parsed.data !== null &&
         (parsed.data as { parseError?: boolean }).parseError === true;
+      if (parseFailed) {
+        const raw = (parsed.data as { raw?: string }).raw ?? "";
+        logger.warn(
+          `[agent-executor] ${config.type} parse failed — raw response (first 500 chars): ${raw.slice(0, 500).replace(/\n/g, "\n")}`,
+        );
+      }
       return {
         agentId: config.id,
         agentType: config.type,
@@ -386,6 +399,12 @@ async function executeAgentWithTools(
     typeof parsed.data === "object" &&
     parsed.data !== null &&
     (parsed.data as { parseError?: boolean }).parseError === true;
+  if (parseFailed) {
+    const raw = (parsed.data as { raw?: string }).raw ?? "";
+    logger.warn(
+      `[agent-executor] ${config.type} parse failed — raw response (first 500 chars): ${raw.slice(0, 500).replace(/\n/g, "\n")}`,
+    );
+  }
   return {
     agentId: config.id,
     agentType: config.type,
@@ -653,6 +672,12 @@ function parseBatchResponse(
         typeof parsedResult.data === "object" &&
         parsedResult.data !== null &&
         (parsedResult.data as { parseError?: boolean }).parseError === true;
+      if (parseFailed) {
+        const raw = (parsedResult.data as { raw?: string }).raw ?? "";
+        logger.warn(
+          `[agent-executor] ${config.type} parse failed — raw response (first 500 chars): ${raw.slice(0, 500).replace(/\n/g, "\n")}`,
+        );
+      }
       parsed.push({
         agentId: config.id,
         agentType: config.type,
