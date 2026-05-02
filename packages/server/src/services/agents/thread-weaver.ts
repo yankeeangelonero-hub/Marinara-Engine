@@ -18,11 +18,27 @@ import {
 const threadIdGen = customAlphabet("0123456789abcdef", 6);
 const newThreadId = () => `thr_${threadIdGen()}`;
 
+const STATE_KEY = "state";
+
 /**
  * Read the Thread Weaver state from a raw agent-memory blob.
  * Provides safe defaults for missing keys so a fresh chat returns a coherent shape.
  */
 export function readState(memory: Record<string, unknown>): ThreadWeaverState {
+  // New format: single JSON blob under "state". Atomic write, atomic read.
+  const blob = memory[STATE_KEY];
+  if (blob && typeof blob === "object" && !Array.isArray(blob)) {
+    const b = blob as Record<string, unknown>;
+    return {
+      activeThreads: (b.activeThreads as PlotThread[] | undefined) ?? [],
+      recentlyFired: (b.recentlyFired as PlotThread[] | undefined) ?? [],
+      invalidatedThreads: (b.invalidatedThreads as PlotThread[] | undefined) ?? [],
+      pendingFiring: (b.pendingFiring as PendingFiring[] | undefined) ?? [],
+      pendingForceFires: (b.pendingForceFires as PendingForceFire[] | undefined) ?? [],
+      turnCounter: Number(b.turnCounter ?? 0),
+    };
+  }
+  // Legacy format: 6 separate keys. Read once, next write upgrades to blob.
   return {
     activeThreads: (memory.activeThreads as PlotThread[] | undefined) ?? [],
     recentlyFired: (memory.recentlyFired as PlotThread[] | undefined) ?? [],
@@ -397,16 +413,18 @@ export function buildMainPromptBlocks(firings: PendingFiring[]): { sceneDirectiv
 }
 
 /**
- * Convert the state back to the per-key memory blob persisted in agentMemory.
+ * Convert the state back to a single-key memory blob persisted in agentMemory.
  * Pairs with readState() — what setMemoryBatch should write.
  */
 export function toMemoryEntries(state: ThreadWeaverState): Record<string, unknown> {
   return {
-    activeThreads: state.activeThreads,
-    recentlyFired: state.recentlyFired,
-    invalidatedThreads: state.invalidatedThreads,
-    pendingFiring: state.pendingFiring,
-    pendingForceFires: state.pendingForceFires,
-    turnCounter: state.turnCounter,
+    [STATE_KEY]: {
+      activeThreads: state.activeThreads,
+      recentlyFired: state.recentlyFired,
+      invalidatedThreads: state.invalidatedThreads,
+      pendingFiring: state.pendingFiring,
+      pendingForceFires: state.pendingForceFires,
+      turnCounter: state.turnCounter,
+    },
   };
 }
