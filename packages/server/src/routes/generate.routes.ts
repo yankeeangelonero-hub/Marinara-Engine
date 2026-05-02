@@ -133,7 +133,6 @@ import {
   ageOutWindows,
   applyDecisions,
   buildMainPromptBlocks,
-  mechanicalFire,
   preparePrePass,
   readState,
   serializeAgentContext,
@@ -4383,9 +4382,6 @@ export async function generateRoutes(app: FastifyInstance) {
             (agentContext.memory._threadWeaverState as ReturnType<typeof readState>) ??
             readState(await agentsStore.getMemory(threadWeaverAgent.id, input.chatId));
 
-          // Build state by running mechanical fire first (server-controlled, fast).
-          let { state: stateAfterMechanical, firingsThisTurn } = mechanicalFire(stateAfterAgent, settings);
-
           if (twResult?.success && twResult.data && typeof twResult.data === "object") {
             const data = twResult.data as {
               newThreads?: NewThreadInput[];
@@ -4395,11 +4391,10 @@ export async function generateRoutes(app: FastifyInstance) {
             const plants = Array.isArray(data.newThreads) ? data.newThreads : [];
 
             try {
-              const applied = applyDecisions(stateAfterMechanical, firingsThisTurn, decisions, plants, settings);
+              const applied = applyDecisions(stateAfterAgent, decisions, plants, settings);
               stateAfterAgent = ageOutWindows(applied.state, settings);
-              firingsThisTurn = applied.firingsThisTurn;
 
-              const blocks = buildMainPromptBlocks(firingsThisTurn);
+              const blocks = buildMainPromptBlocks(applied.firingsThisTurn);
               twSceneDirective = blocks.sceneDirective;
               twMeanwhileCutaway = blocks.meanwhileCutaway;
 
@@ -4409,23 +4404,15 @@ export async function generateRoutes(app: FastifyInstance) {
                 toMemoryEntries(stateAfterAgent),
               );
               logger.debug(
-                `[thread-weaver] Post-pass: ${plants.length} new, ${decisions.length} decisions, ${firingsThisTurn.length} firings injected`,
+                `[thread-weaver] Post-pass: ${plants.length} new, ${decisions.length} decisions, ${applied.firingsThisTurn.length} firings injected`,
               );
             } catch (twErr) {
               logger.error(twErr, "[thread-weaver] Post-pass failed");
             }
           } else if (twResult && !twResult.success) {
-            // Agent failed — still apply mechanical firings, but no new plants.
-            stateAfterAgent = ageOutWindows(stateAfterMechanical, settings);
-            const blocks = buildMainPromptBlocks(firingsThisTurn);
-            twSceneDirective = blocks.sceneDirective;
-            twMeanwhileCutaway = blocks.meanwhileCutaway;
-            await agentsStore.setMemoryBatch(
-              threadWeaverAgent.id,
-              input.chatId,
-              toMemoryEntries(stateAfterAgent),
-            );
-            logger.warn(`[thread-weaver] Agent failed; firings honored mechanically. Error: ${twResult.error ?? "unknown"}`);
+            // Agent failed — keep firing-status threads queued for next turn.
+            // No new firings this turn. State already persisted in pre-pass.
+            logger.warn(`[thread-weaver] Agent failed; firings deferred. Error: ${twResult.error ?? "unknown"}`);
           }
         }
 

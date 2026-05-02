@@ -86,35 +86,6 @@ export function preparePrePass(state: ThreadWeaverState): ThreadWeaverState {
   };
 }
 
-/**
- * Build pendingFiring entries for all threads in `firing` status, using each
- * thread's stored payoffHint as the finalizedDirection. Defaults to on_scene
- * mode. Cap at firingsPerTurnCap; threads beyond the cap stay queued for
- * the next turn. Pure.
- *
- * The agent's firingDecisions (if any) can override these mechanical defaults
- * via applyDecisions — see the post-pass logic in generate.routes.ts.
- */
-export function mechanicalFire(
-  state: ThreadWeaverState,
-  settings: Record<string, unknown>,
-): { state: ThreadWeaverState; firingsThisTurn: PendingFiring[] } {
-  const firingsCap = Number(settings.firingsPerTurnCap ?? THREAD_WEAVER_DEFAULT_SETTINGS.firingsPerTurnCap);
-  const firingThreads = state.activeThreads.filter((t) => t.status === "firing").slice(0, firingsCap);
-
-  const firingsThisTurn: PendingFiring[] = firingThreads.map((t) => ({
-    threadId: t.id,
-    mode: "on_scene",
-    finalizedDirection: t.payoffHint,
-    decidedAtTurn: state.turnCounter,
-  }));
-
-  return {
-    state: { ...state, pendingFiring: firingsThisTurn },
-    firingsThisTurn,
-  };
-}
-
 /** Categories of decisions the agent may emit per firing thread. */
 export interface FiringDecision {
   id: string;
@@ -137,23 +108,24 @@ export interface NewThreadInput {
 
 /**
  * Apply the agent's parsed decisions to the state. Pure.
- * Takes firingsThisTurn pre-populated by mechanicalFire; agent decisions may
- * update (fire actions), remove (invalidate/evolve), or leave those entries alone.
- * Consumes the maxActiveThreads cap, evolutionHistory cap.
- * Returns the next state plus the (possibly-updated) PendingFiring list.
+ * Consumes the firingsPerTurnCap, the maxActiveThreads cap, evolutionHistory cap.
+ * Returns the next state plus the PendingFiring list to inject this turn.
  */
 export function applyDecisions(
   state: ThreadWeaverState,
-  firingsThisTurn: PendingFiring[], // pre-populated by mechanicalFire; this function may modify it
   firingDecisions: FiringDecision[],
   newThreads: NewThreadInput[],
   settings: Record<string, unknown>,
 ): { state: ThreadWeaverState; firingsThisTurn: PendingFiring[] } {
   const turnCounter = state.turnCounter;
+  const firingsCap = Number(settings.firingsPerTurnCap ?? THREAD_WEAVER_DEFAULT_SETTINGS.firingsPerTurnCap);
   const maxActive = Number(settings.maxActiveThreads ?? THREAD_WEAVER_DEFAULT_SETTINGS.maxActiveThreads);
 
   let activeThreads = state.activeThreads;
   let invalidatedThreads = state.invalidatedThreads;
+  const firingsThisTurn: PendingFiring[] = [];
+
+  let firingsAccepted = 0;
 
   for (const decision of firingDecisions) {
     const threadIdx = activeThreads.findIndex((t) => t.id === decision.id);
@@ -164,25 +136,21 @@ export function applyDecisions(
     const thread = activeThreads[threadIdx]!;
 
     if (decision.action === "fire_on_scene" || decision.action === "fire_off_scene") {
-      const idx = firingsThisTurn.findIndex((f) => f.threadId === decision.id);
-      if (idx < 0) {
-        // Thread isn't in mechanical pending — either capped out or invalid id. Skip.
+      if (firingsAccepted >= firingsCap) {
+        // Over cap — leave as `firing`, will be retried next turn.
         continue;
       }
+      if (!decision.finalizedDirection) continue; // malformed; skip
       const mode = decision.action === "fire_on_scene" ? "on_scene" : "off_scene";
-      const updated: PendingFiring = {
-        ...firingsThisTurn[idx]!,
+      firingsThisTurn.push({
+        threadId: decision.id,
         mode,
-      };
-      if (decision.finalizedDirection) {
-        updated.finalizedDirection = decision.finalizedDirection;
-      }
-      firingsThisTurn[idx] = updated;
+        finalizedDirection: decision.finalizedDirection,
+        decidedAtTurn: turnCounter,
+      });
       // Thread stays in activeThreads with status `firing`; gets archived next turn's pre-pass.
+      firingsAccepted++;
     } else if (decision.action === "invalidate") {
-      // Remove any mechanical-firing entry for this thread first.
-      const fIdx = firingsThisTurn.findIndex((f) => f.threadId === decision.id);
-      if (fIdx >= 0) firingsThisTurn.splice(fIdx, 1);
       const updated: PlotThread = {
         ...thread,
         status: "invalidated",
@@ -192,8 +160,6 @@ export function applyDecisions(
       invalidatedThreads = [...invalidatedThreads, updated];
       activeThreads = [...activeThreads.slice(0, threadIdx), ...activeThreads.slice(threadIdx + 1)];
     } else if (decision.action === "evolve") {
-      const fIdx2 = firingsThisTurn.findIndex((f) => f.threadId === decision.id);
-      if (fIdx2 >= 0) firingsThisTurn.splice(fIdx2, 1);
       if (!decision.newFuseType) continue; // malformed; skip
       const historyEntry: ThreadEvolutionEntry = {
         fromPremise: thread.premise,
